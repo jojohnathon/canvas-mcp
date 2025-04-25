@@ -6,6 +6,7 @@ import signal
 import time
 import logging
 import platform
+from dotenv import load_dotenv  # Import load_dotenv
 
 # Configure logging
 logging.basicConfig(
@@ -18,15 +19,23 @@ logging.basicConfig(
 current_dir = os.path.dirname(os.path.abspath(__file__))
 os.chdir(current_dir)
 
+# Load environment variables from .env file *before* accessing them
+dotenv_path = os.path.join(current_dir, '.env')
+if os.path.exists(dotenv_path):
+    logging.info(f"Loading environment variables from: {dotenv_path}")
+    load_dotenv(dotenv_path=dotenv_path)
+else:
+    logging.warning(f".env file not found at {dotenv_path}. Relying on system environment variables.")
+
 # Add the current directory to Python path
 if current_dir not in sys.path:
     sys.path.append(current_dir)
 
-# Environment variables
+# Environment variables (now potentially loaded from .env)
 os.environ["PYTHONPATH"] = os.pathsep.join([current_dir, os.environ.get("PYTHONPATH", "")])
 os.environ["PYTHONUNBUFFERED"] = "1"
 
-# Define ports
+# Define ports (can now use loaded env vars)
 FASTAPI_PORT = os.environ.get("FAST_API_PORT", "8000")
 STREAMLIT_PORT = os.environ.get("STREAMLIT_PORT", "8501")
 

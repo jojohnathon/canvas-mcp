@@ -6,7 +6,9 @@ import os
 import logging
 import json
 import requests
+import httpx  # Use httpx for async requests to MCP server
 from urllib3.exceptions import NewConnectionError, MaxRetryError
+import copy  # Import copy for deep copying schemas
 
 # Configure logging
 logging.basicConfig(
@@ -37,14 +39,41 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 DEEPSEEK_API_URL = os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/v1/chat/completions")
 MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:3001")
+FASTAPI_PORT = os.getenv("FASTAPI_PORT", "8000")
 
 # Check MCP server connectivity
 def check_mcp_server():
-    """Check if the MCP server is available"""
+    """Check if the MCP server is available and return the tools list if successful."""
     try:
-        response = requests.get(f"{MCP_SERVER_URL}/api/tools", timeout=5)
+        response = requests.get(f"{MCP_SERVER_URL}/api/tools", timeout=15)
         if response.status_code == 200:
-            return True, response.json()
+            try:
+                data = response.json()
+
+                # *** Add check: Ensure data is a dictionary ***
+                if not isinstance(data, dict):
+                    logger.warning(f"MCP server response was not a JSON object (dictionary): {str(data)[:200]}...")
+                    return False, None
+
+                # Now safe to access keys
+                if 'result' in data and isinstance(data['result'], dict) and 'tools' in data['result']:
+                     logger.info("Successfully fetched tools from MCP server.")
+                     return True, data['result']['tools'] # Return the actual list
+                else:
+                     # Handle cases where the response is a dict but not the expected JSON-RPC structure
+                     logger.warning(f"MCP server response format unexpected (missing result/tools): {str(data)[:200]}...")
+                     # Attempt to return data if it's already a list (fallback for non-JSON-RPC?)
+                     if isinstance(data, list): # This case is less likely now but kept for safety
+                         logger.warning("Assuming direct list response from MCP server.")
+                         return True, data
+                     return False, None
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to decode JSON response from MCP server: {response.text}")
+                return False, None
+            # Catch the specific attribute error just in case, though the check above should prevent it
+            except AttributeError as e:
+                 logger.error(f"AttributeError while processing MCP response: {e}. Response data: {str(data)[:200]}...")
+                 return False, None
         else:
             logger.warning(f"MCP server returned status code {response.status_code}")
             return False, None
@@ -123,12 +152,72 @@ FALLBACK_TOOLS = [
     }
 ]
 
+# --- Helper Function to Format Tools for LLM ---
+def format_tools_for_llm(tools_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Formats the tool list into the structure expected by the LLM API."""
+    formatted_tools = []
+    if not isinstance(tools_list, list):
+        logger.error(f"Invalid tools_list provided to format_tools_for_llm: {type(tools_list)}. Expected list.")
+        return [] # Return empty list if input is not a list
+
+    for tool in tools_list:
+        # Ensure tool is a dictionary and has the required 'name' key
+        if not isinstance(tool, dict) or 'name' not in tool:
+            logger.warning(f"Skipping invalid tool format: {tool}")
+            continue
+
+        # Basic structure
+        formatted_tool = {
+            "type": "function",
+            "function": {
+                "name": tool.get("name"),
+                "description": tool.get("description", ""), # Provide default empty string
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            }
+        }
+
+        # Process parameters if they exist and are a dictionary
+        parameters = tool.get("parameters")
+        if isinstance(parameters, dict):
+            required_params = []
+            for param_name, param_details in parameters.items():
+                 # Ensure param_details is a dictionary before accessing keys
+                 if isinstance(param_details, dict):
+                     formatted_tool["function"]["parameters"]["properties"][param_name] = {
+                         "type": param_details.get("type", "string"), # Default to string if type missing
+                         "description": param_details.get("description", "")
+                     }
+                     # Assume parameters are required if not explicitly marked optional
+                     # (Adjust this logic if your schema defines optionality differently)
+                     if param_details.get("required", True): # Default to required=True
+                          required_params.append(param_name)
+                 else:
+                      logger.warning(f"Skipping invalid parameter detail format for param '{param_name}' in tool '{tool.get('name')}': {param_details}")
+
+
+            if required_params:
+                formatted_tool["function"]["parameters"]["required"] = required_params
+        elif parameters is not None:
+             logger.warning(f"Tool '{tool.get('name')}' has 'parameters' but it's not a dictionary: {parameters}. Skipping parameter processing.")
+
+
+        formatted_tools.append(formatted_tool)
+
+    return formatted_tools
+# --- End Helper Function ---
+
 # Try to get tools from MCP server or use fallback
-mcp_available, mcp_tools = check_mcp_server()
-TOOLS = mcp_tools if mcp_available else FALLBACK_TOOLS
+mcp_available, mcp_tools_list = check_mcp_server()
+TOOLS = mcp_tools_list if mcp_available and isinstance(mcp_tools_list, list) else FALLBACK_TOOLS
 logger.info(f"MCP server status: {'connected' if mcp_available else 'unavailable'}")
 if not mcp_available:
     logger.warning("Using fallback tools since MCP server is unavailable")
+elif not isinstance(mcp_tools_list, list):
+     logger.warning("MCP server connected but did not return a valid tools list. Using fallback tools.")
 
 @app.get("/")
 def read_root():
@@ -156,137 +245,268 @@ def health_check():
 def get_tools():
     """Get available tools"""
     # Attempt to refresh tools from MCP server
-    mcp_available, mcp_tools = check_mcp_server()
-    if mcp_available:
-        return mcp_tools
+    mcp_available, mcp_tools_list = check_mcp_server()
+    if mcp_available and isinstance(mcp_tools_list, list):
+        return mcp_tools_list # Return the list directly
+    logger.warning("Returning fallback tools for /tools endpoint.")
     return FALLBACK_TOOLS
+
+# --- Refactored MCP Tool Execution Logic ---
+async def _execute_mcp_tool_internal(tool_name: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+    """Internal function to execute a tool via the MCP server."""
+    mcp_available, _ = check_mcp_server() # Re-check availability for safety
+    if not mcp_available:
+        return {"error": "MCP server unavailable during tool execution attempt."}
+
+    try:
+        mcp_payload = {
+            "tool": tool_name,
+            "args": parameters
+        }
+        logger.info(f"Sending execution request to MCP server: {mcp_payload}")
+
+        # Use httpx for async request to MCP server
+        async with httpx.AsyncClient(timeout=40.0) as client:
+             response = await client.post(
+                 f"{MCP_SERVER_URL}/api/execute",
+                 json=mcp_payload,
+             )
+        response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+        logger.info(f"Received execution response from MCP server: {response.status_code}")
+        return response.json()
+
+    except httpx.RequestError as e:
+        logger.error(f"Error executing tool '{tool_name}' on MCP server: {e}")
+        return {"error": f"MCP Request Error: {e}"}
+    except Exception as e:
+        logger.error(f"Unexpected error during MCP tool execution '{tool_name}': {e}")
+        return {"error": f"Unexpected Error: {e}"}
+# --- End Refactored Logic ---
 
 @app.post("/execute", response_model=Dict[str, Any])
 async def execute_tool(request: ToolExecuteRequest):
-    """Execute a tool with the given parameters"""
+    """Execute a tool with the given parameters (now calls internal async function)."""
     tool_name = request.tool_name
     parameters = request.parameters
-    
-    # Find the tool
-    tool = next((t for t in TOOLS if t["name"] == tool_name), None)
+
+    # Refresh the TOOLS list (optional, but good practice)
+    current_mcp_available, current_mcp_tools_list = check_mcp_server()
+    current_tools = current_mcp_tools_list if current_mcp_available and isinstance(current_mcp_tools_list, list) else FALLBACK_TOOLS
+
+    tool = next((t for t in current_tools if t.get("name") == tool_name), None)
     if not tool:
         raise HTTPException(status_code=404, detail=f"Tool '{tool_name}' not found")
-    
-    # Try to execute the tool on the MCP server
-    mcp_available, _ = check_mcp_server()
-    if mcp_available:
-        try:
-            response = requests.post(
-                f"{MCP_SERVER_URL}/api/execute", 
-                json={"tool_name": tool_name, "parameters": parameters},
-                timeout=30
-            )
-            if response.status_code == 200:
-                return response.json()
-            else:
-                logger.error(f"MCP server execution error: {response.status_code}")
-                # Fall back to mock implementation
-        except Exception as e:
-            logger.error(f"Error executing tool on MCP server: {str(e)}")
-            # Fall back to mock implementation
-    
-    # Mock implementation (fallback)
-    if tool_name == "get_courses":
-        return {
-            "courses": [
-                {"id": "1", "name": "Introduction to Computer Science"},
-                {"id": "2", "name": "Web Development"},
-                {"id": "3", "name": "Artificial Intelligence"}
-            ]
-        }
-    elif tool_name == "get_assignments":
-        course_id = parameters.get("course_id")
-        if not course_id:
-            raise HTTPException(status_code=400, detail="Missing required parameter 'course_id'")
-        return {
-            "assignments": [
-                {"id": "101", "name": "Assignment 1", "due_date": "2025-05-15"},
-                {"id": "102", "name": "Assignment 2", "due_date": "2025-05-22"},
-                {"id": "103", "name": "Final Project", "due_date": "2025-06-10"}
-            ]
-        }
-    elif tool_name == "submit_assignment":
-        # Check required parameters
-        required_params = ["course_id", "assignment_id", "submission_text"]
-        for param in required_params:
-            if param not in parameters:
-                raise HTTPException(
-                    status_code=400, 
-                    detail=f"Missing required parameter '{param}'"
-                )
-        
-        return {
-            "status": "success",
-            "message": f"Assignment {parameters['assignment_id']} submitted successfully"
-        }
-    
-    # Default response for unimplemented tools
-    return {"status": "error", "message": f"Tool '{tool_name}' execution not implemented"}
+
+    # Call the internal async function
+    result = await _execute_mcp_tool_internal(tool_name, parameters)
+
+    # Check if the internal function returned an error
+    if isinstance(result, dict) and "error" in result:
+         raise HTTPException(status_code=502, detail=f"MCP tool execution failed: {result['error']}")
+
+    return result
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
-    """Process a chat message and return a response"""
+    """Process a chat message and return a response, potentially using tools."""
     message = request.message
-    history = request.history
-    
+    history = request.history or [] # Ensure history is a list
+
     # Check if API keys are configured
     if not DEEPSEEK_API_KEY and not GOOGLE_API_KEY:
         return ChatResponse(
             response="Sorry, the AI features are not available. API keys are not configured."
         )
-    
-    # Use Deepseek API if available, else fallback to mock responses
+
+    # Use Deepseek API if available
     if DEEPSEEK_API_KEY:
         try:
-            # Prepare conversation history in the format Deepseek expects
-            formatted_history = []
+            # --- Fetch and Format Tools ---
+            current_mcp_available, current_mcp_tools_list = check_mcp_server()
+            current_tools = current_mcp_tools_list if current_mcp_available and isinstance(current_mcp_tools_list, list) else FALLBACK_TOOLS
+            llm_formatted_tools = format_tools_for_llm(current_tools)
+            logger.info(f"Providing {len(llm_formatted_tools)} tools to the LLM.")
+            # --- End Fetch and Format Tools ---
+
+            # Prepare conversation history for the first call
+            first_call_history = []
             for msg in history:
                 role = "user" if msg.get("role") == "user" else "assistant"
-                formatted_history.append({"role": role, "content": msg.get("content", "")})
-            
+                # Include tool_calls if they exist in history for assistant messages
+                content = msg.get("content", "")
+                tool_calls_history = msg.get("tool_calls")
+                if role == "assistant" and tool_calls_history:
+                     first_call_history.append({"role": role, "content": content, "tool_calls": tool_calls_history})
+                # Include tool results if they exist in history
+                elif msg.get("role") == "tool":
+                     first_call_history.append({"role": "tool", "tool_call_id": msg.get("tool_call_id"), "content": content})
+                else:
+                     first_call_history.append({"role": role, "content": content})
+
             # Add current user message
-            formatted_history.append({"role": "user", "content": message})
-            
-            # Make API call to Deepseek
+            first_call_history.append({"role": "user", "content": message})
+
+            # --- First API Call to LLM ---
             headers = {
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
             }
-            
             payload = {
                 "model": "deepseek-chat",
-                "messages": formatted_history,
+                "messages": first_call_history,
                 "temperature": 0.7,
-                "max_tokens": 500
+                "max_tokens": 500,
+                "tools": llm_formatted_tools,
+                "tool_choice": "auto"
             }
-            
-            logger.info("Sending request to Deepseek API")
+
+            logger.info("Sending first request to Deepseek API with tools.")
             response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
             response_data = response.json()
-            
-            if response.status_code == 200:
-                ai_response = response_data.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+            if response.status_code != 200:
+                logger.error(f"Deepseek API error (first call): {response_data}")
+                error_message = response_data.get('error', {}).get('message', 'Unknown error')
+                return ChatResponse(response=f"Sorry, there was an error with the AI service: {error_message}")
+
+            # --- Handle potential tool calls ---
+            response_message = response_data.get("choices", [{}])[0].get("message", {})
+            tool_calls = response_message.get("tool_calls")
+
+            if tool_calls:
+                logger.info(f"LLM requested tool calls: {tool_calls}")
+
+                # Append the assistant's response message (containing the tool_calls request) to history
+                first_call_history.append(response_message)
+
+                # --- Execute Tool Calls ---
+                # TODO: Handle multiple tool calls if the API supports it
+                if not isinstance(tool_calls, list) or len(tool_calls) == 0:
+                     logger.error(f"Invalid tool_calls format received (not a list or empty): {tool_calls}")
+                     return ChatResponse(response="Sorry, the AI returned an invalid tool request format.")
+
+                tool_call = tool_calls[0] # Process the first tool call
+
+                # *** Add check: Ensure tool_call is a dictionary ***
+                if not isinstance(tool_call, dict):
+                    logger.error(f"Invalid tool_call format received (not a dictionary): {tool_call}")
+                    return ChatResponse(response="Sorry, the AI returned an invalid tool request format.")
+
+                tool_call_id = tool_call.get("id")
+                function_info = tool_call.get("function", {})
+
+                # *** Add check: Ensure function_info is a dictionary ***
+                if not isinstance(function_info, dict):
+                    logger.error(f"Invalid function_info format received (not a dictionary): {function_info}")
+                    # Attempt to provide a response even if function_info is bad, using the ID if available
+                    error_msg = "Sorry, the AI returned an invalid tool function format."
+                    if tool_call_id:
+                         # Append a placeholder tool result indicating the error
+                         first_call_history.append({
+                              "role": "tool",
+                              "tool_call_id": tool_call_id,
+                              "content": "Error: Invalid tool function format received from LLM."
+                         })
+                         # Try calling the LLM again to explain the error
+                         logger.info("Sending second request to Deepseek API after invalid function_info.")
+                         payload["messages"] = first_call_history
+                         try:
+                              second_response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
+                              second_response_data = second_response.json()
+                              if second_response.status_code == 200:
+                                   final_ai_response = second_response_data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                                   return ChatResponse(response=final_ai_response or error_msg)
+                              else:
+                                   logger.error(f"Deepseek API error (second call after invalid function_info): {second_response_data}")
+                         except Exception as e_inner:
+                              logger.error(f"Error calling Deepseek API (second call after invalid function_info): {e_inner}")
+                    # Fallback if we can't even call the LLM again
+                    return ChatResponse(response=error_msg)
+
+
+                tool_name = function_info.get("name")
+                try:
+                    # Arguments might be a JSON string, need to parse
+                    tool_args_str = function_info.get("arguments", "{}")
+                    tool_args = json.loads(tool_args_str)
+                except json.JSONDecodeError:
+                    logger.error(f"Failed to parse tool arguments: {tool_args_str}")
+                    tool_args = {}
+                except TypeError:
+                     logger.error(f"Tool arguments were not a string, cannot parse: {tool_args_str}")
+                     tool_args = {}
+
+
+                if not tool_name or not tool_call_id:
+                     logger.error(f"Invalid tool call format received (missing name or id): {tool_call}")
+                     return ChatResponse(response="Sorry, the AI tried to use a tool but the request was malformed.")
+
+                logger.info(f"Executing tool internally: {tool_name} with args: {tool_args}")
+
+                # *** Call the internal async function directly ***
+                tool_result_data = await _execute_mcp_tool_internal(tool_name, tool_args)
+
+                # Process the result (check for errors, format for LLM)
+                if isinstance(tool_result_data, dict) and "error" in tool_result_data:
+                    tool_result_content = f"Error executing tool '{tool_name}': {tool_result_data['error']}"
+                    logger.error(tool_result_content)
+                else:
+                    # Format successful result as string
+                    try:
+                        # Attempt to extract text content if possible (same logic as before)
+                        if isinstance(tool_result_data, dict) and 'content' in tool_result_data:
+                            content_list = tool_result_data['content']
+                            if isinstance(content_list, list) and len(content_list) > 0 and isinstance(content_list[0], dict) and 'text' in content_list[0]:
+                                tool_result_content = content_list[0]['text']
+                            else:
+                                tool_result_content = json.dumps(tool_result_data['content'])
+                        else:
+                            tool_result_content = json.dumps(tool_result_data)
+                        logger.info(f"Tool '{tool_name}' executed successfully via internal call.")
+                    except Exception as format_exc:
+                        logger.error(f"Error formatting tool result: {format_exc}")
+                        tool_result_content = f"Error formatting tool result: {format_exc}"
+
+
+                # Append the tool result message to the history
+                first_call_history.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": tool_result_content
+                })
+
+                # --- Second API Call to LLM with Tool Result ---
+                logger.info("Sending second request to Deepseek API with tool result.")
+                payload["messages"] = first_call_history # Update messages with tool result
+
+                second_response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
+                second_response_data = second_response.json()
+
+                if second_response.status_code == 200:
+                    final_ai_response = second_response_data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    if not final_ai_response:
+                         final_ai_response = "Sorry, I received the tool result but couldn't generate a final response."
+                    return ChatResponse(response=final_ai_response)
+                else:
+                    logger.error(f"Deepseek API error (second call): {second_response_data}")
+                    error_message = second_response_data.get('error', {}).get('message', 'Unknown error after tool execution')
+                    return ChatResponse(response=f"Sorry, there was an error with the AI service after using a tool: {error_message}")
+                # --- End Second API Call ---
+
+            else:
+                # No tool call, just get the content from the first response
+                ai_response = response_message.get("content", "")
                 if not ai_response:
                     ai_response = "Sorry, I couldn't generate a response."
-                
                 return ChatResponse(response=ai_response)
-            else:
-                logger.error(f"Deepseek API error: {response_data}")
-                return ChatResponse(
-                    response=f"Sorry, there was an error with the AI service: {response_data.get('error', {}).get('message', 'Unknown error')}"
-                )
-                
+            # --- End Handle tool calls ---
+
         except Exception as e:
-            logger.error(f"Error calling Deepseek API: {str(e)}")
+            logger.exception(f"Error in chat endpoint: {str(e)}") # Use logger.exception for stack trace
             return ChatResponse(
-                response=f"Sorry, there was an error communicating with the AI service: {str(e)}"
+                response=f"Sorry, there was an unexpected error processing your request: {str(e)}"
             )
-    
+
     # Fallback to mock responses
     if "course" in message.lower():
         response = "You're currently enrolled in 3 courses: Introduction to Computer Science, Web Development, and Artificial Intelligence."

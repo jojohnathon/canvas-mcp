@@ -67,7 +67,8 @@ class CanvasServer {
   private setupRequestHandlers() {
     // List available tools
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
-      return {
+      console.error("Received ListToolsRequest"); // Log when the handler is invoked
+      const toolsResponse = {
         tools: [
           {
             name: "list-courses",
@@ -425,6 +426,8 @@ class CanvasServer {
           },
         ],
       };
+      console.error("Sending ListToolsResponse:", JSON.stringify(toolsResponse).substring(0, 200) + '...'); // Log the response being sent
+      return toolsResponse;
     });
 
     // Handle tool execution
@@ -1591,8 +1594,14 @@ Please present this information in a clear, concise format that helps me quickly
   // Starts the server using stdio transport
   public async start() {
     const transport = new StdioServerTransport();
-    await this.server.connect(transport);
-    console.error("Canvas MCP Server running on stdio");
+    console.error("Attempting to connect server to stdio transport..."); // Log before connect
+    try {
+      await this.server.connect(transport);
+      console.error("Canvas MCP Server successfully connected and running on stdio"); // Log success
+    } catch (error) {
+      console.error("Error connecting server to stdio transport:", error); // Log connection error
+      throw error; // Re-throw error to ensure process exits if connection fails
+    }
   }
 }
 
@@ -1610,7 +1619,8 @@ if (!config.apiToken) {
 
 // Start the server
 const server = new CanvasServer(config);
+console.error("Starting Canvas MCP Server..."); // Log before starting
 server.start().catch((error) => {
-  console.error("Fatal error:", error);
+  console.error("Fatal error during server startup:", error); // Log fatal startup errors
   process.exit(1);
 });
