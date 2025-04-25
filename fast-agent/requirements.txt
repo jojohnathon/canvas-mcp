@@ -12,4 +12,5 @@ langchain-google-vertexai>=0.0.1
 google-cloud-aiplatform>=1.36.0
 markdown>=3.5
 python-multipart==0.0.6
-starlette>=0.27.0 
+starlette>=0.27.0
+openai>=1.0.0

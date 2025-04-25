@@ -148,141 +148,29 @@ try:
     if tools_response.status_code == 200:
         tools = tools_response.json()
         
-        # Create tabs for tools
-        tabs = st.tabs([tool["name"] for tool in tools])
-        
-        for i, tool in enumerate(tools):
-            with tabs[i]:
-                st.subheader(tool["name"])
-                st.markdown(tool["description"])
-                st.markdown("**Parameters:**")
-                
-                with st.form(f"tool-{tool['name']}"):
-                    params = {}
-                    
-                    # Generate input fields for each parameter
-                    for param_name, param_info in tool["parameters"].items():
-                        param_type = param_info.get("type", "string")
-                        param_desc = param_info.get("description", "")
-                        
-                        if param_type == "integer":
-                            params[param_name] = st.number_input(f"{param_name}: {param_desc}", step=1)
-                        elif param_type == "number":
-                            params[param_name] = st.number_input(f"{param_name}: {param_desc}")
-                        elif param_type == "boolean":
-                            params[param_name] = st.checkbox(f"{param_name}: {param_desc}")
-                        else:  # default to string
-                            params[param_name] = st.text_input(f"{param_name}: {param_desc}")
-                    
-                    # Execute button
-                    submit = st.form_submit_button("Execute Tool")
-                    
-                    if submit:
-                        with st.spinner(f"Executing {tool['name']}..."):
-                            try:
-                                # Call the execute endpoint
-                                exec_response = requests.post(
-                                    f"{API_URL}/execute",
-                                    json={"tool_name": tool["name"], "parameters": params},
-                                    timeout=60
-                                )
-                                
-                                if exec_response.status_code == 200:
-                                    result = exec_response.json()
-                                    st.success("Tool executed successfully!")
-                                    st.json(result)
-                                else:
-                                    st.error(f"Error executing tool: {exec_response.text}")
-                            except Exception as e:
-                                st.error(f"Failed to execute tool: {str(e)}")
+        # Check if tools list is not empty before displaying
+        if tools:
+            with st.expander("View Available Tools"):
+                for tool in tools:
+                    st.subheader(tool["name"])
+                    st.markdown(tool["description"])
+                    if tool.get("parameters"):
+                        st.markdown("**Parameters:**")
+                        # Display parameters in a more readable format
+                        param_list = []
+                        for param_name, param_info in tool["parameters"].items():
+                            req = " (required)" if param_info.get("required") else ""
+                            param_list.append(f"- `{param_name}` ({param_info.get('type', 'string')}){req}: {param_info.get('description', '')}")
+                        st.markdown("\n".join(param_list))
+                    else:
+                        st.markdown("**Parameters:** None")
+                    st.markdown("---")
+        else:
+            st.info("No tools available from the API.") # Display message if no tools
     else:
         st.warning(f"Could not fetch tools: {tools_response.status_code} - {tools_response.text}")
 except Exception as e:
     st.error(f"Failed to load tools: {str(e)}")
-
-# MCP Tools section
-st.header("Canvas MCP Tools")
-try:
-    # Fetch tools from the MCP server
-    tools_response = requests.get(f"{MCP_URL}/api/tools", timeout=5)
-    if tools_response.status_code == 200:
-        tools = tools_response.json()
-        
-        # Check if any tools are available
-        if tools:
-            st.success(f"✅ Connected to MCP Server - Found {len(tools)} tools")
-            
-            # Create tabs for tools
-            tool_names = [tool.get("name", f"Tool {i+1}") for i, tool in enumerate(tools)]
-            tabs = st.tabs(tool_names)
-            
-            for i, tool in enumerate(tools):
-                with tabs[i]:
-                    tool_name = tool.get("name", f"Tool {i+1}")
-                    tool_description = tool.get("description", "No description available")
-                    tool_args = tool.get("args", [])
-                    
-                    st.subheader(tool_name)
-                    st.markdown(tool_description)
-                    
-                    # Create form to execute the tool
-                    with st.form(f"mcp-tool-{tool_name}"):
-                        st.markdown("**Parameters:**")
-                        
-                        # Generate input fields for each parameter
-                        params = {}
-                        for arg in tool_args:
-                            arg_name = arg.get("name", "")
-                            arg_desc = arg.get("description", "")
-                            arg_type = arg.get("type", "string")
-                            
-                            if arg_type == "number":
-                                params[arg_name] = st.number_input(f"{arg_name}: {arg_desc}")
-                            elif arg_type == "boolean":
-                                params[arg_name] = st.checkbox(f"{arg_name}: {arg_desc}")
-                            else:  # default to string
-                                params[arg_name] = st.text_input(f"{arg_name}: {arg_desc}")
-                        
-                        # Execute button
-                        submit = st.form_submit_button("Execute Tool")
-                        
-                        if submit:
-                            with st.spinner(f"Executing {tool_name}..."):
-                                try:
-                                    # Call the execute endpoint on MCP
-                                    exec_response = requests.post(
-                                        f"{MCP_URL}/api/execute",
-                                        json={
-                                            "name": tool_name,
-                                            "args": params
-                                        },
-                                        timeout=60
-                                    )
-                                    
-                                    if exec_response.status_code == 200:
-                                        result = exec_response.json()
-                                        st.success("Tool executed successfully!")
-                                        
-                                        # Display the output in a nice format
-                                        output = result.get("output", "No output returned")
-                                        st.markdown("### Result")
-                                        st.markdown(output)
-                                        
-                                        # If there's structured data, show it as JSON
-                                        if isinstance(output, dict) or isinstance(output, list):
-                                            st.json(output)
-                                    else:
-                                        st.error(f"Error executing tool: {exec_response.status_code} - {exec_response.text}")
-                                except Exception as e:
-                                    st.error(f"Failed to execute tool: {str(e)}")
-        else:
-            st.warning("No tools found on the MCP server")
-    else:
-        st.error(f"Could not fetch tools from MCP: {tools_response.status_code} - {tools_response.text}")
-except Exception as e:
-    st.error(f"Failed to connect to MCP server: {str(e)}")
-    st.info(f"Attempting to connect to MCP at: {MCP_URL}")
-    st.markdown("Make sure the MCP server is running and accessible.")
 
 # Footer
 st.markdown("---")

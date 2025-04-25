@@ -222,6 +222,7 @@ app.get('/api/tools', async (req, res) => {
 });
 
 app.post('/api/execute', async (req, res) => {
+    console.log(`>>> Received request on /api/execute with body:`, req.body); // <-- Add this line
     // Use correct SDK method name
     // MCP spec expects params: { name: string, arguments: object }
     const params = {

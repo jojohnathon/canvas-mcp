@@ -50,9 +50,10 @@ def run_fastapi():
     fastapi_cmd = [
         sys.executable,
         "-m", "uvicorn",
-        "app.main:app",
+        "api.main:app",  # Corrected module path to api.main
         "--host", "localhost",
         "--port", FASTAPI_PORT,
+        "--log-level", "debug",
     ] + reload_flag
     
     logging.info(f"Running FastAPI with command: {' '.join(fastapi_cmd)}")
