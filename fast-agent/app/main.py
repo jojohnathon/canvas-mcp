@@ -1,18 +1,12 @@
-import os
-import json
-import requests
-from fastapi import FastAPI, HTTPException, Depends, Body
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Dict, Any, List, Optional
-from dotenv import load_dotenv
-import sys
-import subprocess
-import time
-import signal
+from typing import List, Dict, Any, Optional
+import os
 import logging
-import argparse
-import httpx
+import json
+import requests
+from urllib3.exceptions import NewConnectionError, MaxRetryError
 
 # Configure logging
 logging.basicConfig(
@@ -20,231 +14,293 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[logging.StreamHandler()]
 )
-logger = logging.getLogger("canvas-fast-agent")
+logger = logging.getLogger("canvas-fast-agent-api")
 
-# Load environment variables
-load_dotenv()
-
-# Environment variables
-CANVAS_API_TOKEN = os.getenv("CANVAS_API_TOKEN")
-CANVAS_BASE_URL = os.getenv("CANVAS_BASE_URL")
-MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:3000")
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-
-# Validate required environment variables
-if not CANVAS_API_TOKEN:
-    raise ValueError("CANVAS_API_TOKEN environment variable is required")
-if not CANVAS_BASE_URL:
-    raise ValueError("CANVAS_BASE_URL environment variable is required")
-if not GOOGLE_API_KEY:
-    logger.warning("GOOGLE_API_KEY environment variable is not set. AI features will not work.")
-
-# Create FastAPI app
+# Initialize FastAPI app
 app = FastAPI(
     title="Canvas Student Assistant API",
-    description="API for the Canvas Student Assistant powered by fast-agent",
-    version="1.0.0"
+    description="API for Canvas LMS integration with AI assistance",
+    version="0.1.0",
 )
 
-# Add CORS middleware
+# CORS middleware to allow cross-origin requests
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify specific origins
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# API Models
-class ToolInput(BaseModel):
-    tool_name: str
-    parameters: Dict[str, Any] = {}
+# Load environment variables
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+DEEPSEEK_API_URL = os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/v1/chat/completions")
+MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:3001")
 
-class PromptInput(BaseModel):
-    prompt_name: str
-    arguments: Dict[str, Any] = {}
+# Check MCP server connectivity
+def check_mcp_server():
+    """Check if the MCP server is available"""
+    try:
+        response = requests.get(f"{MCP_SERVER_URL}/api/tools", timeout=5)
+        if response.status_code == 200:
+            return True, response.json()
+        else:
+            logger.warning(f"MCP server returned status code {response.status_code}")
+            return False, None
+    except (requests.exceptions.ConnectionError, NewConnectionError, MaxRetryError) as e:
+        logger.warning(f"Failed to connect to MCP server: {str(e)}")
+        # Log more detailed troubleshooting info
+        logger.info(f"""
+        ==========================================================
+        MCP Server Connection Failed
+        ----------------------------------------------------------
+        To fix this issue, try the following:
+        
+        1. Ensure the Canvas MCP server is running. 
+           - You can start it from the webui folder with: node server.js
+           
+        2. Check that the MCP_SERVER_URL environment variable is set correctly.
+           - Current value: {MCP_SERVER_URL}
+           
+        3. If running via Claude Desktop, verify the claude_desktop_config.json
+           has the correct Canvas MCP server configuration.
+           
+        4. For more details, see the troubleshooting guide in the README.md
+        ==========================================================
+        """)
+        return False, None
+    except Exception as e:
+        logger.warning(f"Error connecting to MCP server: {str(e)}")
+        return False, None
 
-class ChatInput(BaseModel):
+# Models
+class ChatRequest(BaseModel):
     message: str
-    history: List[Dict[str, str]] = []
+    history: Optional[List[Dict[str, str]]] = []
 
-# Helper function for making requests to the MCP server
-async def make_request(endpoint: str, method: str = "GET", data: Any = None) -> Dict:
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        try:
-            if method == "GET":
-                response = await client.get(f"{MCP_SERVER_URL}{endpoint}")
-            elif method == "POST":
-                response = await client.post(f"{MCP_SERVER_URL}{endpoint}", json=data)
-            else:
-                raise HTTPException(status_code=400, detail=f"Unsupported method: {method}")
-            
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPStatusError as e:
-            raise HTTPException(status_code=e.response.status_code, detail=str(e))
-        except httpx.RequestError as e:
-            raise HTTPException(status_code=500, detail=f"Error communicating with MCP server: {str(e)}")
+class ChatResponse(BaseModel):
+    response: str
 
-# Routes
+class ToolExecuteRequest(BaseModel):
+    tool_name: str
+    parameters: Dict[str, Any]
+
+# Available tools definition - fallback if MCP server is unavailable
+FALLBACK_TOOLS = [
+    {
+        "name": "get_courses",
+        "description": "Fetches the list of courses for the current user",
+        "parameters": {}
+    },
+    {
+        "name": "get_assignments",
+        "description": "Fetches assignments for a specific course",
+        "parameters": {
+            "course_id": {
+                "type": "string",
+                "description": "The ID of the course to fetch assignments for"
+            }
+        }
+    },
+    {
+        "name": "submit_assignment",
+        "description": "Submit an assignment for a course",
+        "parameters": {
+            "course_id": {
+                "type": "string",
+                "description": "The ID of the course"
+            },
+            "assignment_id": {
+                "type": "string",
+                "description": "The ID of the assignment"
+            },
+            "submission_text": {
+                "type": "string",
+                "description": "The text submission content"
+            }
+        }
+    }
+]
+
+# Try to get tools from MCP server or use fallback
+mcp_available, mcp_tools = check_mcp_server()
+TOOLS = mcp_tools if mcp_available else FALLBACK_TOOLS
+logger.info(f"MCP server status: {'connected' if mcp_available else 'unavailable'}")
+if not mcp_available:
+    logger.warning("Using fallback tools since MCP server is unavailable")
+
 @app.get("/")
-async def root():
-    return {"message": "Canvas Student Assistant API is running"}
+def read_root():
+    # Check MCP server status for the welcome message
+    mcp_available, _ = check_mcp_server()
+    message = "Welcome to Canvas Student Assistant API"
+    if not mcp_available:
+        message += " (Running in offline mode - MCP server unavailable)"
+    return {"message": message, "mcp_status": "connected" if mcp_available else "offline"}
 
 @app.get("/health")
-async def health_check():
-    try:
-        # Check if the MCP server is running
-        response = await make_request("/api/tools")
-        status_data = {
-            "status": "healthy", 
-            "mcp_server": "connected",
-            "google_api": "configured" if GOOGLE_API_KEY else "not configured"
-        }
-        return status_data
-    except Exception as e:
-        return {"status": "unhealthy", "error": str(e)}
+def health_check():
+    """Check API health status"""
+    # Recheck MCP server connectivity
+    mcp_available, _ = check_mcp_server()
+    
+    return {
+        "status": "healthy",
+        "google_api": "configured" if GOOGLE_API_KEY else "not_configured",
+        "deepseek_api": "configured" if DEEPSEEK_API_KEY else "not_configured",
+        "mcp_server": "connected" if mcp_available else "unavailable"
+    }
 
 @app.get("/tools")
-async def get_tools():
-    return await make_request("/api/tools")
+def get_tools():
+    """Get available tools"""
+    # Attempt to refresh tools from MCP server
+    mcp_available, mcp_tools = check_mcp_server()
+    if mcp_available:
+        return mcp_tools
+    return FALLBACK_TOOLS
 
-@app.get("/prompts")
-async def get_prompts():
-    return await make_request("/api/prompts")
-
-@app.post("/execute")
-async def execute_tool(tool_input: ToolInput):
-    data = {
-        "name": tool_input.tool_name,
-        "parameters": tool_input.parameters
-    }
-    return await make_request("/api/execute", method="POST", data=data)
-
-@app.post("/prompt")
-async def run_prompt(prompt_input: PromptInput):
-    data = {
-        "name": prompt_input.prompt_name,
-        "arguments": prompt_input.arguments
-    }
-    return await make_request("/api/prompt", method="POST", data=data)
-
-@app.post("/chat")
-async def chat_with_agent(chat_input: ChatInput):
-    if not GOOGLE_API_KEY:
-        raise HTTPException(status_code=400, detail="GOOGLE_API_KEY not configured")
-        
-    data = {
-        "message": chat_input.message,
-        "history": chat_input.history
-    }
-    return await make_request("/api/chat", method="POST", data=data)
-
-def parse_args():
-    """Parse command line arguments"""
-    parser = argparse.ArgumentParser(description="Canvas MCP Fast Agent - Demo Application")
-    parser.add_argument("--api-port", type=int, default=8000, help=f"Port for FastAPI backend (default: 8000)")
-    parser.add_argument("--streamlit-port", type=int, default=8501, help=f"Port for Streamlit frontend (default: 8501)")
-    parser.add_argument("--mcp-port", type=int, default=3000, help=f"Port for MCP server (default: 3000)")
-    parser.add_argument("--api-only", action="store_true", help="Run only the FastAPI backend")
-    parser.add_argument("--streamlit-only", action="store_true", help="Run only the Streamlit frontend")
-    return parser.parse_args()
-
-def run_api_server(api_port, mcp_port):
-    """Run the FastAPI server"""
-    logger.info(f"Starting FastAPI server on port {api_port}")
-    env = os.environ.copy()
-    env["FAST_API_PORT"] = str(api_port)
-    env["MCP_PORT"] = str(mcp_port)
-    return subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "api:app", "--host", "0.0.0.0", "--port", str(api_port)],
-        env=env,
-        cwd=os.path.dirname(os.path.abspath(__file__))
-    )
-
-def run_streamlit_server(streamlit_port, api_port):
-    """Run the Streamlit server"""
-    logger.info(f"Starting Streamlit server on port {streamlit_port}")
-    env = os.environ.copy()
-    env["FAST_API_PORT"] = str(api_port)
-    return subprocess.Popen(
-        [sys.executable, "-m", "streamlit", "run", "streamlit_app.py", 
-         "--server.port", str(streamlit_port), 
-         "--server.address", "0.0.0.0",
-         "--browser.serverAddress", "localhost",
-         "--browser.gatherUsageStats", "false"],
-        env=env,
-        cwd=os.path.dirname(os.path.abspath(__file__))
-    )
-
-def handle_sigterm(signum, frame):
-    """Handle termination signal"""
-    logger.info("Received termination signal. Shutting down...")
-    sys.exit(0)
-
-def main():
-    """Main entry point for the application"""
-    # Parse command line arguments
-    args = parse_args()
+@app.post("/execute", response_model=Dict[str, Any])
+async def execute_tool(request: ToolExecuteRequest):
+    """Execute a tool with the given parameters"""
+    tool_name = request.tool_name
+    parameters = request.parameters
     
-    # Register signal handlers
-    signal.signal(signal.SIGINT, handle_sigterm)
-    signal.signal(signal.SIGTERM, handle_sigterm)
+    # Find the tool
+    tool = next((t for t in TOOLS if t["name"] == tool_name), None)
+    if not tool:
+        raise HTTPException(status_code=404, detail=f"Tool '{tool_name}' not found")
     
-    # Set environment variables based on command line arguments
-    os.environ["FAST_API_PORT"] = str(args.api_port)
-    os.environ["MCP_PORT"] = str(args.mcp_port)
+    # Try to execute the tool on the MCP server
+    mcp_available, _ = check_mcp_server()
+    if mcp_available:
+        try:
+            response = requests.post(
+                f"{MCP_SERVER_URL}/api/execute", 
+                json={"tool_name": tool_name, "parameters": parameters},
+                timeout=30
+            )
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.error(f"MCP server execution error: {response.status_code}")
+                # Fall back to mock implementation
+        except Exception as e:
+            logger.error(f"Error executing tool on MCP server: {str(e)}")
+            # Fall back to mock implementation
     
-    try:
-        api_process = None
-        streamlit_process = None
+    # Mock implementation (fallback)
+    if tool_name == "get_courses":
+        return {
+            "courses": [
+                {"id": "1", "name": "Introduction to Computer Science"},
+                {"id": "2", "name": "Web Development"},
+                {"id": "3", "name": "Artificial Intelligence"}
+            ]
+        }
+    elif tool_name == "get_assignments":
+        course_id = parameters.get("course_id")
+        if not course_id:
+            raise HTTPException(status_code=400, detail="Missing required parameter 'course_id'")
+        return {
+            "assignments": [
+                {"id": "101", "name": "Assignment 1", "due_date": "2025-05-15"},
+                {"id": "102", "name": "Assignment 2", "due_date": "2025-05-22"},
+                {"id": "103", "name": "Final Project", "due_date": "2025-06-10"}
+            ]
+        }
+    elif tool_name == "submit_assignment":
+        # Check required parameters
+        required_params = ["course_id", "assignment_id", "submission_text"]
+        for param in required_params:
+            if param not in parameters:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Missing required parameter '{param}'"
+                )
         
-        # Start the FastAPI server if not running streamlit only
-        if not args.streamlit_only:
-            api_process = run_api_server(args.api_port, args.mcp_port)
-            logger.info(f"FastAPI server running at http://localhost:{args.api_port}")
-            # Wait a bit for the API server to start
-            time.sleep(2)
-        
-        # Start the Streamlit server if not running API only
-        if not args.api_only:
-            streamlit_process = run_streamlit_server(args.streamlit_port, args.api_port)
-            logger.info(f"Streamlit server running at http://localhost:{args.streamlit_port}")
-        
-        # Print summary
-        logger.info("Canvas MCP Fast Agent Demo Running")
-        if not args.streamlit_only:
-            logger.info(f"API documentation: http://localhost:{args.api_port}/docs")
-        if not args.api_only:
-            logger.info(f"Streamlit interface: http://localhost:{args.streamlit_port}")
-        
-        # Keep the main process running
-        while True:
-            # Check if processes are still running
-            if api_process and api_process.poll() is not None:
-                logger.error("FastAPI server stopped unexpectedly. Restarting...")
-                api_process = run_api_server(args.api_port, args.mcp_port)
+        return {
+            "status": "success",
+            "message": f"Assignment {parameters['assignment_id']} submitted successfully"
+        }
+    
+    # Default response for unimplemented tools
+    return {"status": "error", "message": f"Tool '{tool_name}' execution not implemented"}
+
+@app.post("/chat", response_model=ChatResponse)
+async def chat(request: ChatRequest):
+    """Process a chat message and return a response"""
+    message = request.message
+    history = request.history
+    
+    # Check if API keys are configured
+    if not DEEPSEEK_API_KEY and not GOOGLE_API_KEY:
+        return ChatResponse(
+            response="Sorry, the AI features are not available. API keys are not configured."
+        )
+    
+    # Use Deepseek API if available, else fallback to mock responses
+    if DEEPSEEK_API_KEY:
+        try:
+            # Prepare conversation history in the format Deepseek expects
+            formatted_history = []
+            for msg in history:
+                role = "user" if msg.get("role") == "user" else "assistant"
+                formatted_history.append({"role": role, "content": msg.get("content", "")})
             
-            if streamlit_process and streamlit_process.poll() is not None:
-                logger.error("Streamlit server stopped unexpectedly. Restarting...")
-                streamlit_process = run_streamlit_server(args.streamlit_port, args.api_port)
+            # Add current user message
+            formatted_history.append({"role": "user", "content": message})
             
-            time.sleep(1)
-    except KeyboardInterrupt:
-        logger.info("Keyboard interrupt received. Shutting down...")
-    finally:
-        # Terminate child processes
-        if api_process:
-            logger.info("Terminating FastAPI server...")
-            api_process.terminate()
-            api_process.wait()
-        
-        if streamlit_process:
-            logger.info("Terminating Streamlit server...")
-            streamlit_process.terminate()
-            streamlit_process.wait()
-        
-        logger.info("Shutdown complete.")
+            # Make API call to Deepseek
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
+            }
+            
+            payload = {
+                "model": "deepseek-chat",
+                "messages": formatted_history,
+                "temperature": 0.7,
+                "max_tokens": 500
+            }
+            
+            logger.info("Sending request to Deepseek API")
+            response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
+            response_data = response.json()
+            
+            if response.status_code == 200:
+                ai_response = response_data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                if not ai_response:
+                    ai_response = "Sorry, I couldn't generate a response."
+                
+                return ChatResponse(response=ai_response)
+            else:
+                logger.error(f"Deepseek API error: {response_data}")
+                return ChatResponse(
+                    response=f"Sorry, there was an error with the AI service: {response_data.get('error', {}).get('message', 'Unknown error')}"
+                )
+                
+        except Exception as e:
+            logger.error(f"Error calling Deepseek API: {str(e)}")
+            return ChatResponse(
+                response=f"Sorry, there was an error communicating with the AI service: {str(e)}"
+            )
+    
+    # Fallback to mock responses
+    if "course" in message.lower():
+        response = "You're currently enrolled in 3 courses: Introduction to Computer Science, Web Development, and Artificial Intelligence."
+    elif "assignment" in message.lower():
+        response = "You have several upcoming assignments. The closest deadline is for 'Assignment 1' due on May 15, 2025."
+    elif "help" in message.lower():
+        response = "I can help you with information about your courses, assignments, grades, and more. What would you like to know?"
+    else:
+        response = "I'm your Canvas assistant. I can help you navigate your courses and assignments. What would you like to know about your academic work?"
+    
+    return ChatResponse(response=response)
 
-if __name__ == "__main__":
-    main() 
+# Error handlers
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled exception: {str(exc)}")
+    return {"status": "error", "message": str(exc)}

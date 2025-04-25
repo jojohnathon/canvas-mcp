@@ -1,12 +1,11 @@
 #!/usr/bin/env python
-import subprocess
-import sys
 import os
-import argparse
-import time
+import sys
+import subprocess
 import signal
+import time
 import logging
-from dotenv import load_dotenv
+import platform
 
 # Configure logging
 logging.basicConfig(
@@ -14,104 +13,138 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[logging.StreamHandler()]
 )
-logger = logging.getLogger("canvas-assistant")
 
-# Load environment variables
-load_dotenv()
+# Get the absolute path of the current script
+current_dir = os.path.dirname(os.path.abspath(__file__))
+os.chdir(current_dir)
 
-def parse_args():
-    """Parse command line arguments"""
-    parser = argparse.ArgumentParser(description="Canvas Student Assistant")
-    parser.add_argument("--api-port", type=int, default=8000, help="Port for FastAPI backend (default: 8000)")
-    parser.add_argument("--streamlit-port", type=int, default=8501, help="Port for Streamlit frontend (default: 8501)")
-    parser.add_argument("--api-only", action="store_true", help="Run only the FastAPI backend")
-    parser.add_argument("--streamlit-only", action="store_true", help="Run only the Streamlit frontend")
-    return parser.parse_args()
+# Add the current directory to Python path
+if current_dir not in sys.path:
+    sys.path.append(current_dir)
 
-def run_api_server(api_port):
+# Environment variables
+os.environ["PYTHONPATH"] = os.pathsep.join([current_dir, os.environ.get("PYTHONPATH", "")])
+os.environ["PYTHONUNBUFFERED"] = "1"
+
+# Define ports
+FASTAPI_PORT = os.environ.get("FAST_API_PORT", "8000")
+STREAMLIT_PORT = os.environ.get("STREAMLIT_PORT", "8501")
+
+def run_fastapi():
     """Run the FastAPI server"""
-    logger.info(f"Starting FastAPI server on port {api_port}")
-    env = os.environ.copy()
-    env["PORT"] = str(api_port)
+    logging.info("Starting FastAPI server...")
+    
+    # Check if we're on Windows - if so, disable reload to avoid multiprocessing issues
+    is_windows = platform.system() == "Windows"
+    reload_flag = [] if is_windows else ["--reload"]
+    
+    fastapi_cmd = [
+        sys.executable,
+        "-m", "uvicorn",
+        "app.main:app",
+        "--host", "localhost",
+        "--port", FASTAPI_PORT,
+    ] + reload_flag
+    
+    logging.info(f"Running FastAPI with command: {' '.join(fastapi_cmd)}")
     return subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", str(api_port), "--reload"],
-        env=env
+        fastapi_cmd,
+        cwd=current_dir,
+        env=os.environ.copy()
     )
 
-def run_streamlit_server(streamlit_port, api_port):
+def run_streamlit():
     """Run the Streamlit server"""
-    logger.info(f"Starting Streamlit server on port {streamlit_port}")
-    env = os.environ.copy()
-    env["FASTAPI_URL"] = f"http://localhost:{api_port}"
+    logging.info("Starting Streamlit server...")
+    
+    # Get the absolute path to the streamlit app
+    streamlit_app_path = os.path.join(current_dir, "app", "streamlit_app.py")
+    logging.info(f"Streamlit app path: {streamlit_app_path}")
+    
+    # Verify that the file exists
+    if not os.path.exists(streamlit_app_path):
+        logging.error(f"Streamlit app file not found: {streamlit_app_path}")
+        # List directory contents to help debug
+        app_dir = os.path.join(current_dir, "app")
+        if os.path.exists(app_dir):
+            logging.info(f"Contents of {app_dir}: {os.listdir(app_dir)}")
+    
+    streamlit_cmd = [
+        sys.executable,
+        "-m", "streamlit", "run",
+        streamlit_app_path,
+        "--server.port", STREAMLIT_PORT,
+        "--server.address", "localhost"
+    ]
+    
+    logging.info(f"Running Streamlit with command: {' '.join(streamlit_cmd)}")
     return subprocess.Popen(
-        [sys.executable, "-m", "streamlit", "run", "app/streamlit_app.py", 
-         "--server.port", str(streamlit_port)],
-        env=env
+        streamlit_cmd,
+        cwd=current_dir,  # Run from the project root, not app dir
+        env=os.environ.copy()
     )
 
-def handle_sigterm(signum, frame):
-    """Handle termination signal"""
-    logger.info("Received termination signal. Shutting down...")
+# Global flag for clean shutdown
+is_shutting_down = False
+
+def handle_exit(signum, frame):
+    """Handle termination signals"""
+    global is_shutting_down
+    if is_shutting_down:
+        return
+    
+    is_shutting_down = True
+    logging.info("Received termination signal. Shutting down...")
+    
+    logging.info("Terminating FastAPI server...")
+    if 'fastapi_process' in globals() and fastapi_process and fastapi_process.poll() is None:
+        fastapi_process.terminate()
+    
+    logging.info("Terminating Streamlit server...")
+    if 'streamlit_process' in globals() and streamlit_process and streamlit_process.poll() is None:
+        streamlit_process.terminate()
+    
+    # Allow processes to terminate gracefully
+    time.sleep(1)
+    
+    # Force kill if still running
+    if 'fastapi_process' in globals() and fastapi_process and fastapi_process.poll() is None:
+        fastapi_process.kill()
+    if 'streamlit_process' in globals() and streamlit_process and streamlit_process.poll() is None:
+        streamlit_process.kill()
+    
+    logging.info("Shutdown complete.")
     sys.exit(0)
 
-def main():
-    # Parse command line arguments
-    args = parse_args()
-    
+if __name__ == "__main__":
     # Register signal handlers
-    signal.signal(signal.SIGINT, handle_sigterm)
-    signal.signal(signal.SIGTERM, handle_sigterm)
+    signal.signal(signal.SIGINT, handle_exit)
+    signal.signal(signal.SIGTERM, handle_exit)
     
     try:
-        api_process = None
-        streamlit_process = None
+        # Start servers
+        fastapi_process = run_fastapi()
+        streamlit_process = run_streamlit()
         
-        # Start the FastAPI server if not running streamlit only
-        if not args.streamlit_only:
-            api_process = run_api_server(args.api_port)
-            logger.info(f"FastAPI server running at http://localhost:{args.api_port}")
-            # Wait a bit for the API server to start
-            time.sleep(2)
+        logging.info(f"FastAPI server running on http://localhost:{FASTAPI_PORT}")
+        logging.info(f"Streamlit server running on http://localhost:{STREAMLIT_PORT}")
         
-        # Start the Streamlit server if not running API only
-        if not args.api_only:
-            streamlit_process = run_streamlit_server(args.streamlit_port, args.api_port)
-            logger.info(f"Streamlit server running at http://localhost:{args.streamlit_port}")
-        
-        # Print summary
-        logger.info("Canvas Student Assistant Running")
-        if not args.streamlit_only:
-            logger.info(f"API documentation: http://localhost:{args.api_port}/docs")
-        if not args.api_only:
-            logger.info(f"Streamlit interface: http://localhost:{args.streamlit_port}")
-        
-        # Keep the main process running
+        # Monitor processes
         while True:
             # Check if processes are still running
-            if api_process and api_process.poll() is not None:
-                logger.error("FastAPI server stopped unexpectedly. Restarting...")
-                api_process = run_api_server(args.api_port)
+            if fastapi_process.poll() is not None:
+                logging.error(f"FastAPI server exited with code {fastapi_process.returncode}")
+                break
             
-            if streamlit_process and streamlit_process.poll() is not None:
-                logger.error("Streamlit server stopped unexpectedly. Restarting...")
-                streamlit_process = run_streamlit_server(args.streamlit_port, args.api_port)
+            if streamlit_process.poll() is not None:
+                logging.error(f"Streamlit server exited with code {streamlit_process.returncode}")
+                break
             
             time.sleep(1)
-    except KeyboardInterrupt:
-        logger.info("Keyboard interrupt received. Shutting down...")
+    
+    except Exception as e:
+        logging.error(f"Error: {str(e)}")
+    
     finally:
-        # Terminate child processes
-        if api_process:
-            logger.info("Terminating FastAPI server...")
-            api_process.terminate()
-            api_process.wait()
-        
-        if streamlit_process:
-            logger.info("Terminating Streamlit server...")
-            streamlit_process.terminate()
-            streamlit_process.wait()
-        
-        logger.info("Shutdown complete.")
-
-if __name__ == "__main__":
-    main() 
+        # Ensure clean shutdown
+        handle_exit(None, None)
