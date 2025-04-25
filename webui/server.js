@@ -22,6 +22,13 @@ console.log('CANVAS_BASE_URL:', process.env.CANVAS_BASE_URL);
 // Create a copy of the environment for the child process
 const childEnv = Object.assign({}, process.env);
 
+// Log environment variables being passed (mask token)
+const loggedEnv = { 
+  CANVAS_API_TOKEN: childEnv.CANVAS_API_TOKEN ? '********' : undefined, 
+  CANVAS_BASE_URL: childEnv.CANVAS_BASE_URL 
+};
+console.log('Environment variables for MCP server:', loggedEnv);
+
 // Set port for the web server
 const PORT = process.env.PORT || 3001;
 
@@ -79,6 +86,7 @@ mcpServer.stdout.on('data', (data) => {
         if (responseResolver) { // Check if we are waiting for a response
             try {
                 const responseJson = JSON.parse(completeMessage);
+                console.log(`Parsed MCP Response JSON:`, JSON.stringify(responseJson, null, 2)); // Log parsed response
                 console.log(`Resolving pending request with received JSON.`);
                 clearTimeout(responseTimeout); // Clear the timeout
                 responseResolver(responseJson); // Resolve the promise
@@ -87,7 +95,8 @@ mcpServer.stdout.on('data', (data) => {
                 console.error('Raw complete message line:', completeMessage);
                 clearTimeout(responseTimeout); // Clear the timeout
                 if(responseRejector) {
-                    responseRejector(new Error('Error parsing MCP server response'));
+                    // Pass specific error back
+                    responseRejector(new Error(`Error parsing MCP server response: ${err.message}`));
                 }
             } finally {
                  // Reset resolver/rejector for the next request
@@ -171,7 +180,7 @@ async function handleMcpRequest(req, res, mcpMethodName, params = {}) {
         return res.status(500).json({ error: 'Server busy, previous MCP request pending.' });
     }
 
-    console.log(`Handling MCP request, Method: ${mcpMethodName}`);
+    console.log(`Handling MCP request, Method: ${mcpMethodName}, Params:`, JSON.stringify(params, null, 2)); // Log params
 
     try {
         // Create a promise that will be resolved when the response arrives
@@ -182,13 +191,14 @@ async function handleMcpRequest(req, res, mcpMethodName, params = {}) {
             // Timeout for this specific request
             responseTimeout = setTimeout(() => {
                 if (responseResolver) { // Check if it's still pending
-                    console.error(`MCP response timeout for method: ${mcpMethodName}`);
+                    const timeoutError = new Error(`MCP response timeout after 15s for method: ${mcpMethodName}`);
+                    console.error(timeoutError.message); // Log timeout error
                     responseResolver = null; // Clear resolver
                     responseRejector = null; // Clear rejector
-                    reject(new Error(`MCP response timeout for ${mcpMethodName}`));
+                    reject(timeoutError); // Reject with specific timeout error
                 }
             }, 15000); // 15 second timeout
-        });
+        }); // End of Promise constructor
 
         // Send JSON-RPC request
         const requestPayload = JSON.stringify({
@@ -202,17 +212,24 @@ async function handleMcpRequest(req, res, mcpMethodName, params = {}) {
              console.warn(`MCP stdin write buffer full for method: ${mcpMethodName}`);
         }
 
-        // Wait for the response
+        // Wait for the response *inside* the try block
         const response = await responsePromise;
         res.json(response); // Send the received JSON directly
 
-    } catch (error) {
-        console.error(`Error in MCP request handler for method ${mcpMethodName}:`, error);
-        // Ensure resolver/rejector are cleared if timeout didn't already
+    } catch (error) { // Catch block starts here
+        // Log the specific error that occurred during handling
+        console.error(`Error handling MCP request for method ${mcpMethodName}:`, error);
+        // Avoid sending headers twice if already sent
+        if (!res.headersSent) {
+            res.status(500).json({ error: error.message || 'Internal server error' });
+        } else {
+             console.error("Headers already sent, cannot send error response to client.");
+        }
+    } finally {
+        // Ensure resolver/rejector are always cleared after the request attempt
         responseResolver = null;
         responseRejector = null;
-        responseTimeout = null; // Should be cleared by timeout or success, but clear just in case
-        res.status(500).json({ error: error.message || 'Internal server error' });
+        // Timeout is cleared in success/error/timeout paths, no need to clear here unless adding redundant safety
     }
 }
 
@@ -222,13 +239,15 @@ app.get('/api/tools', async (req, res) => {
 });
 
 app.post('/api/execute', async (req, res) => {
-    console.log(`>>> Received request on /api/execute with body:`, req.body); // <-- Add this line
+    // Log the raw request body as well for comparison
+    console.log(`>>> Raw request body for /api/execute:`, req.body);
     // Use correct SDK method name
     // MCP spec expects params: { name: string, arguments: object }
     const params = {
         name: req.body.tool,
         arguments: req.body.args || {}
     };
+    // Removed duplicate log from previous step
     await handleMcpRequest(req, res, 'tools/call', params);
 });
 

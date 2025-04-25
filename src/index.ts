@@ -433,103 +433,102 @@ class CanvasServer {
     // Handle tool execution
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
+      console.error(`Received CallToolRequest for: ${name} with args: ${JSON.stringify(args)}`); // Log request
 
       try {
         switch (name) {
           case "list-courses":
             return await this.handleListCourses();
+
           case "post-announcement":
             return await this.handlePostAnnouncement(args);
+
           case "list-rubrics":
             return await this.handleListRubrics(args);
+
           case "list-students":
             return await this.handleListStudents(args);
+
           case "list-assignments":
             return await this.handleListAssignments(args);
+
           case "list-assignment-submissions":
             return await this.handleListAssignmentSubmissions(args);
+
           case "list-section-submissions":
             return await this.handleListSectionSubmissions(args);
+
           case "list-sections":
             return await this.handleListSections(args);
+
           case "post-submission-comment":
             return await this.handlePostSubmissionComment(args);
+
           case "get-rubric-statistics":
             return await this.handleGetRubricStatistics(args);
+
           // Student tool handlers
           case "get-my-todo-items":
             return await this.studentTools.getMyTodoItems();
+
           case "get-upcoming-assignments":
             return await this.studentTools.getUpcomingAssignments();
+
           case "get-course-grade":
-            if (!args?.courseId) {
-              throw new Error("courseId is required for get-course-grade");
+            if (!args || typeof args.courseId !== 'string') {
+              throw new Error("Missing or invalid 'courseId' argument for get-course-grade");
             }
-            return await this.studentTools.getCourseGrade({
-              courseId: args.courseId as string
-            });
+            return await this.studentTools.getCourseGrade(args as { courseId: string });
+
           case "get-assignment-details":
-            if (!args?.courseId || !args?.assignmentId) {
-              throw new Error("courseId and assignmentId are required for get-assignment-details");
+            if (!args || typeof args.courseId !== 'string' || typeof args.assignmentId !== 'string') {
+              throw new Error("Missing or invalid 'courseId' or 'assignmentId' arguments for get-assignment-details");
             }
-            return await this.studentTools.getAssignmentDetails({
-              courseId: args.courseId as string,
-              assignmentId: args.assignmentId as string
-            });
+            return await this.studentTools.getAssignmentDetails(args as { courseId: string; assignmentId: string });
+
           case "get-recent-announcements":
-            return await this.studentTools.getRecentAnnouncements(
-              args ? { days: args.days as number } : {}
-            );
+            return await this.studentTools.getRecentAnnouncements(args as { days?: number });
+
           case "list-course-modules":
-            if (!args?.courseId) {
-              throw new Error("courseId is required for list-course-modules");
+            if (!args || typeof args.courseId !== 'string') {
+              throw new Error("Missing or invalid 'courseId' argument for list-course-modules");
             }
-            return await this.studentTools.listCourseModules({
-              courseId: args.courseId as string
-            });
+            return await this.studentTools.listCourseModules(args as { courseId: string });
+
           case "find-course-files":
-            if (!args?.courseId || !args?.searchTerm) {
-              throw new Error("courseId and searchTerm are required for find-course-files");
+            if (!args || typeof args.courseId !== 'string' || typeof args.searchTerm !== 'string') {
+              throw new Error("Missing or invalid 'courseId' or 'searchTerm' arguments for find-course-files");
             }
-            return await this.studentTools.findCourseFiles({
-              courseId: args.courseId as string,
-              searchTerm: args.searchTerm as string
-            });
+            return await this.studentTools.findCourseFiles(args as { courseId: string; searchTerm: string });
+
           case "get-unread-discussions":
-            if (!args?.courseId) {
-              throw new Error("courseId is required for get-unread-discussions");
+            if (!args || typeof args.courseId !== 'string') {
+              throw new Error("Missing or invalid 'courseId' argument for get-unread-discussions");
             }
-            return await this.studentTools.getUnreadDiscussions({
-              courseId: args.courseId as string
-            });
+            return await this.studentTools.getUnreadDiscussions(args as { courseId: string });
+
           case "view-discussion-topic":
-            if (!args?.courseId || !args?.topicId) {
-              throw new Error("courseId and topicId are required for view-discussion-topic");
+            if (!args || typeof args.courseId !== 'string' || typeof args.topicId !== 'string') {
+              throw new Error("Missing or invalid 'courseId' or 'topicId' arguments for view-discussion-topic");
             }
-            return await this.studentTools.viewDiscussionTopic({
-              courseId: args.courseId as string,
-              topicId: args.topicId as string
-            });
+            return await this.studentTools.viewDiscussionTopic(args as { courseId: string; topicId: string });
+
           case "get-my-quiz-submission":
-            if (!args?.courseId || !args?.quizId) {
-              throw new Error("courseId and quizId are required for get-my-quiz-submission");
+            if (!args || typeof args.courseId !== 'string' || typeof args.quizId !== 'string') {
+              throw new Error("Missing or invalid 'courseId' or 'quizId' arguments for get-my-quiz-submission");
             }
-            return await this.studentTools.getMyQuizSubmission({
-              courseId: args.courseId as string,
-              quizId: args.quizId as string
-            });
+            return await this.studentTools.getMyQuizSubmission(args as { courseId: string; quizId: string });
+
           default:
             throw new Error(`Unknown tool: ${name}`);
         }
       } catch (error: any) {
-        console.error('Error executing tool:', error);
+        console.error(`Error executing tool '${name}':`, error); // Log error with tool name
         return {
-          content: [
-            {
-              type: "text",
-              text: `Error: ${error.message}`,
-            },
-          ],
+          error: {
+            code: -32000,
+            message: `Tool execution failed: ${error.message}`
+          }
         };
       }
     });

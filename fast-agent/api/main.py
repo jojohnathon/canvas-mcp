@@ -7,6 +7,8 @@ from datetime import datetime
 import logging
 from api.services.llm_service import llm_service # Change this import to get the instance directly
 from typing import List, Dict, Any # Add typing imports
+import time # Import time
+import httpx
 
 # Load environment variables from .env file in the parent directory
 dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env') 
@@ -142,14 +144,22 @@ async def execute_mcp_tool(tool_name: str, tool_args: dict) -> str:
     mcp_execute_url = f"{MCP_URL}/api/execute" # Define URL early for logging
     try:
         payload = {"tool": tool_name, "args": tool_args}
-        # Log payload as JSON string for clarity
-        logger.info(f"Executing tool '{tool_name}' via MCP bridge: {mcp_execute_url} with payload: {json.dumps(payload)}")
+        # Log payload as JSON string for clarity - CHANGED TO DEBUG (removed indent)
+        logger.debug(f"Executing tool '{tool_name}' via MCP bridge: {mcp_execute_url} with payload: {json.dumps(payload)}")
+        logger.info(f"Executing tool '{tool_name}' via MCP bridge...") # Add simpler INFO log
 
-        response = requests.post(mcp_execute_url, json=payload, timeout=60)
+        start_time = time.time() # Start timer for HTTP call
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(mcp_execute_url, json=payload)
+        end_time = time.time() # End timer for HTTP call
+        duration = end_time - start_time
+        logger.info(f"HTTP call to {mcp_execute_url} for tool '{tool_name}' completed in {duration:.2f} seconds with status {response.status_code}.")
+
         response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
 
         result_data = response.json()
-        logger.info(f"Received successful response from MCP bridge execute: {json.dumps(result_data, indent=2)}")
+        # CHANGED TO DEBUG (removed indent)
+        logger.debug(f"Received successful response from MCP bridge execute: {json.dumps(result_data)}")
 
         # Extract content from the 'result' object
         mcp_result = result_data.get("result", {}) # Get the inner result object
@@ -172,44 +182,26 @@ async def execute_mcp_tool(tool_name: str, tool_args: dict) -> str:
             logger.warning("Could not find 'content' or 'error' in the 'result' object, returning result as JSON string.")
             return json.dumps(mcp_result)
 
-    except requests.exceptions.HTTPError as http_err:
-        # Handle HTTP errors (4xx, 5xx) specifically
-        error_msg = f"HTTP error calling MCP bridge execute endpoint for tool '{tool_name}' at {mcp_execute_url}: {http_err}"
-        logger.error(error_msg)
-        response_text = ""
-        # Log response details if available
-        if http_err.response is not None:
-            response_text = http_err.response.text
-            logger.error(f"Response status: {http_err.response.status_code}, Response body: {response_text}")
-            try:
-                # Try to parse JSON detail, matching the observed {"detail":"Not Found"}
-                detail = http_err.response.json()
-                # Return the specific detail message
-                return f"Error executing tool: {detail}"
-            except json.JSONDecodeError:
-                 # If response is not JSON, return status and reason
-                 return f"Error executing tool: {http_err.response.status_code} - {http_err.response.reason}"
-        else:
-             # Return generic HTTP error if no response object
-             return error_msg
-
-    except requests.exceptions.RequestException as req_err:
-        # Handle other request errors (connection, timeout, etc.)
-        error_msg = f"Request error calling MCP bridge execute endpoint for tool '{tool_name}' at {mcp_execute_url}: {req_err}"
-        logger.error(error_msg)
-        return error_msg # Return error message to LLM
-
+    except httpx.TimeoutException:
+        end_time = time.time() # End timer even on timeout
+        duration = end_time - start_time
+        logger.error(f"Timeout after {duration:.2f}s calling MCP server at {mcp_execute_url} for tool '{tool_name}'.")
+        return f"Error: Timeout waiting for tool {tool_name} to execute."
+    except httpx.RequestError as req_err:
+        end_time = time.time() # End timer even on request error
+        duration = end_time - start_time
+        logger.error(f"HTTP request error after {duration:.2f}s calling MCP server for tool '{tool_name}': {req_err}")
+        return f"Error: Could not connect to the tool execution server for {tool_name}."
     except json.JSONDecodeError as json_err:
-        # Handle errors parsing the successful JSON response (less likely after raise_for_status)
-        error_msg = f"Error parsing JSON response from MCP bridge for tool '{tool_name}': {json_err}"
-        logger.error(error_msg)
-        return error_msg
-
+        end_time = time.time() # End timer even on JSON error
+        duration = end_time - start_time
+        logger.error(f"Failed to decode JSON response after {duration:.2f}s from MCP server for tool '{tool_name}': {json_err}. Response text: {response.text}")
+        return f"Error: Received invalid response format from the tool execution server for {tool_name}."
     except Exception as e:
-        # Catch-all for unexpected errors during execution/parsing
-        error_msg = f"Unexpected error executing tool '{tool_name}' via MCP bridge: {e}"
-        logger.exception(error_msg) # Log with stack trace
-        return error_msg # Return error message to LLM
+        end_time = time.time() # End timer for other errors
+        duration = end_time - start_time
+        logger.exception(f"An unexpected error occurred after {duration:.2f}s during MCP tool execution for '{tool_name}': {e}")
+        return f"Error: An unexpected error occurred while executing tool {tool_name}."
 # --- End Tool Executor ---
 
 
@@ -278,22 +270,23 @@ async def get_tools():
         response = requests.get(mcp_tools_url, timeout=10)
         response.raise_for_status() # This would raise an error if status != 2xx
 
-        # Log the raw JSON response text
+        # Log the raw JSON response text - CHANGED TO DEBUG
         raw_response_text = response.text
-        logger.info(f"Raw text response from MCP bridge /api/tools: {raw_response_text}")
+        logger.debug(f"Raw text response from MCP bridge /api/tools: {raw_response_text}")
 
-        # Log the parsed JSON response
+        # Log the parsed JSON response - CHANGED TO DEBUG (removed indent)
         try:
             parsed_json = response.json()
-            logger.info(f"Parsed JSON response from MCP bridge /api/tools: {json.dumps(parsed_json, indent=2)}")
+            logger.debug(f"Parsed JSON response from MCP bridge /api/tools: {json.dumps(parsed_json)}")
         except json.JSONDecodeError as json_err:
             logger.error(f"Failed to parse JSON response from bridge: {json_err}")
             logger.error(f"Raw text was: {raw_response_text}")
             parsed_json = {} # Avoid further errors
 
         # Get the tools list from the 'result' object
-        mcp_tools_raw = parsed_json.get("result", {}).get("tools", []) 
-        logger.info(f"Extracted 'tools' list from bridge response: {json.dumps(mcp_tools_raw, indent=2)}") # Log the extracted list
+        mcp_tools_raw = parsed_json.get("result", {}).get("tools", [])
+        # Log the extracted list - CHANGED TO DEBUG (removed indent)
+        logger.debug(f"Extracted 'tools' list from bridge response: {json.dumps(mcp_tools_raw)}")
 
         if isinstance(mcp_tools_raw, list):
             logger.info(f"Successfully fetched {len(mcp_tools_raw)} tools from MCP bridge. Transforming schema...")
@@ -367,6 +360,7 @@ async def get_tools():
     if not all_tools:
         logger.warning("No tools were loaded, returning empty list.")
 
-    # Add explicit logging before returning
-    logger.info(f"Returning final tools list from get_tools: {json.dumps(all_tools, indent=2)}") 
+    # Add explicit logging before returning - CHANGED TO DEBUG (removed indent)
+    logger.debug(f"Returning final tools list from get_tools: {json.dumps(all_tools)}")
+    logger.info(f"Returning {len(all_tools)} tools from get_tools.") # Add simpler INFO log
     return all_tools

@@ -4,15 +4,15 @@ import sys
 import subprocess
 import signal
 import time
-import logging
+import logging  # Import logging
 import platform
 from dotenv import load_dotenv  # Import load_dotenv
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[logging.StreamHandler()]
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",  # Added logger name
+    handlers=[logging.StreamHandler()]  # Ensure output goes to console
 )
 
 # Get the absolute path of the current script
@@ -47,16 +47,23 @@ def run_fastapi():
     is_windows = platform.system() == "Windows"
     reload_flag = [] if is_windows else ["--reload"]
     
+    # Define path to logging config
+    log_config_path = os.path.join(current_dir, "logging.ini")
+
     fastapi_cmd = [
         sys.executable,
         "-m", "uvicorn",
-        "api.main:app",  # Corrected module path to api.main
+        "api.main:app",
         "--host", "localhost",
         "--port", FASTAPI_PORT,
-        "--log-level", "debug",
-    ] + reload_flag
+        "--log-config", log_config_path # Ensure this is used
+    ]
+    # Add reload flag separately if not on Windows
+    if not is_windows:
+        fastapi_cmd.append("--reload")
     
-    logging.info(f"Running FastAPI with command: {' '.join(fastapi_cmd)}")
+    # Log the *final* command being used
+    logging.info(f"Running FastAPI with command: {' '.join(fastapi_cmd)}") 
     return subprocess.Popen(
         fastapi_cmd,
         cwd=current_dir,
