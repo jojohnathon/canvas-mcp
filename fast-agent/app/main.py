@@ -157,7 +157,7 @@ def run_api_server(api_port, mcp_port):
     env["FAST_API_PORT"] = str(api_port)
     env["MCP_PORT"] = str(mcp_port)
     return subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "api:app", "--host", "0.0.0.0", "--port", str(api_port), "--reload"],
+        [sys.executable, "-m", "uvicorn", "api:app", "--host", "0.0.0.0", "--port", str(api_port)],
         env=env,
         cwd=os.path.dirname(os.path.abspath(__file__))
     )
