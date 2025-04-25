@@ -1,259 +1,146 @@
 import os
 import json
-import asyncio
-import logging
-from typing import Dict, List, Any, Optional
-from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+import requests
+from fastapi import FastAPI, HTTPException, Depends, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from contextlib import asynccontextmanager
-
-from agent import get_mcp_tools, create_agent_chain
+from typing import Dict, Any, List, Optional
+from dotenv import load_dotenv
+import logging
+import httpx
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler()]
 )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("canvas-fast-agent-api")
 
 # Load environment variables
 load_dotenv()
 
-# Get Google API Key
+# Environment variables
+CANVAS_API_TOKEN = os.getenv("CANVAS_API_TOKEN")
+CANVAS_BASE_URL = os.getenv("CANVAS_BASE_URL")
+MCP_PORT = os.getenv("MCP_PORT", "3000")
+MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", f"http://localhost:{MCP_PORT}")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-if not GOOGLE_API_KEY:
-    logger.warning("GOOGLE_API_KEY environment variable not set. AI features will not work.")
 
-# Initialize agent tools and chain on startup
-tools = []
-agent_chain = None
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Load tools and create agent chain on startup
-    global tools, agent_chain
-    try:
-        tools = await get_mcp_tools()
-        if GOOGLE_API_KEY:
-            agent_chain = await create_agent_chain(tools)
-            logger.info("Agent tools and chain initialized successfully")
-        else:
-            logger.warning("Google API key not found - AI features disabled")
-    except Exception as e:
-        logger.error(f"Failed to initialize agent: {str(e)}")
-    
-    yield
-    
-    # Cleanup on shutdown
-    logger.info("Shutting down API")
+# Log environment variables for debugging
+logger.info(f"MCP_PORT: {MCP_PORT}")
+logger.info(f"MCP_SERVER_URL: {MCP_SERVER_URL}")
 
 # Create FastAPI app
 app = FastAPI(
     title="Canvas Student Assistant API",
-    description="API for interacting with Canvas MCP through LangChain agents",
-    version="1.0.0",
-    lifespan=lifespan
+    description="API for the Canvas Student Assistant powered by fast-agent",
+    version="1.0.0"
 )
 
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # For production, specify the actual frontend domain
+    allow_origins=["*"],  # In production, specify specific origins
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Pydantic models
-class HealthResponse(BaseModel):
-    status: str
-    agent_ready: bool
-
-class ChatRequest(BaseModel):
-    message: str
-    history: Optional[List[Dict[str, str]]] = []
-
-class ChatResponse(BaseModel):
-    response: str
-    tool_calls: Optional[List[Dict[str, Any]]] = None
-
-class PromptRequest(BaseModel):
-    prompt_name: str
-    parameters: Optional[Dict[str, str]] = {}
-
-class PromptResponse(BaseModel):
-    output: str
-    tool_calls: Optional[List[Dict[str, Any]]] = None
-
-class ToolRequest(BaseModel):
+# API Models
+class ToolInput(BaseModel):
     tool_name: str
-    parameters: Dict[str, Any]
+    parameters: Dict[str, Any] = {}
 
-class ToolResponse(BaseModel):
-    result: Any
+class PromptInput(BaseModel):
+    prompt_name: str
+    arguments: Dict[str, Any] = {}
 
-# API routes
-@app.get("/health", response_model=HealthResponse)
+class ChatInput(BaseModel):
+    message: str
+    history: List[Dict[str, str]] = []
+
+# Helper function for making requests to the MCP server
+async def make_request(endpoint: str, method: str = "GET", data: Any = None) -> Dict:
+    logger.info(f"Making {method} request to {MCP_SERVER_URL}{endpoint}")
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        try:
+            if method == "GET":
+                response = await client.get(f"{MCP_SERVER_URL}{endpoint}")
+            elif method == "POST":
+                response = await client.post(f"{MCP_SERVER_URL}{endpoint}", json=data)
+            else:
+                raise HTTPException(status_code=400, detail=f"Unsupported method: {method}")
+            
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error: {e}")
+            raise HTTPException(status_code=e.response.status_code, detail=str(e))
+        except httpx.RequestError as e:
+            logger.error(f"Request error: {e}")
+            raise HTTPException(status_code=500, detail=f"Error communicating with MCP server: {str(e)}")
+
+# Routes
+@app.get("/")
+async def root():
+    return {"message": "Canvas Student Assistant API is running"}
+
+@app.get("/health")
 async def health_check():
-    """Check API health and agent readiness"""
-    return {
-        "status": "healthy",
-        "agent_ready": agent_chain is not None,
-        "google_api": "configured" if GOOGLE_API_KEY else "not configured"
-    }
+    try:
+        # Check if the MCP server is running
+        response = await make_request("/api/tools")
+        status_data = {
+            "status": "healthy", 
+            "mcp_server": "connected",
+            "google_api": "configured" if GOOGLE_API_KEY else "not configured"
+        }
+        return status_data
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return {"status": "unhealthy", "error": str(e)}
 
 @app.get("/tools")
 async def get_tools():
-    """Get available MCP tools"""
-    global tools
-    if not tools:
-        try:
-            tools = await get_mcp_tools()
-        except Exception as e:
-            logger.error(f"Failed to fetch tools: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Failed to fetch tools: {str(e)}")
-    
-    # Format the tools for display
-    formatted_tools = []
-    for tool in tools:
-        formatted_tools.append({
-            "name": tool.name,
-            "description": tool.description,
-            "parameters": [
-                {"name": param.name, "description": param.description}
-                for param in tool.params
-            ] if hasattr(tool, "params") else []
-        })
-    
-    return formatted_tools
+    return await make_request("/api/tools")
 
 @app.get("/prompts")
 async def get_prompts():
-    """Get available MCP predefined prompts"""
-    try:
-        # Fetch prompts from MCP server
-        MCP_SERVER_URL = os.getenv("MCP_URL", "http://localhost:3000")
-        
-        import httpx
-        async with httpx.AsyncClient() as client:
-            response = await client.get(f"{MCP_SERVER_URL}/api/prompts")
-            response.raise_for_status()
-            prompts = response.json()
-        
-        return prompts
-    except Exception as e:
-        logger.error(f"Failed to fetch prompts: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch prompts: {str(e)}")
+    return await make_request("/api/prompts")
 
-@app.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
-    """Process a chat message using the LangChain agent"""
-    global agent_chain
-    
+@app.post("/execute")
+async def execute_tool(tool_input: ToolInput):
+    data = {
+        "name": tool_input.tool_name,
+        "parameters": tool_input.parameters
+    }
+    return await make_request("/api/execute", method="POST", data=data)
+
+@app.post("/prompt")
+async def run_prompt(prompt_input: PromptInput):
+    data = {
+        "name": prompt_input.prompt_name,
+        "arguments": prompt_input.arguments
+    }
+    return await make_request("/api/prompt", method="POST", data=data)
+
+@app.post("/chat")
+async def chat_with_agent(chat_input: ChatInput):
     if not GOOGLE_API_KEY:
-        raise HTTPException(status_code=400, detail="Google API Key not configured. AI features disabled.")
-    
-    if agent_chain is None:
-        try:
-            tools = await get_mcp_tools()
-            agent_chain = await create_agent_chain(tools)
-        except Exception as e:
-            logger.error(f"Failed to initialize agent: {str(e)}")
-            raise HTTPException(status_code=500, detail="Agent not available")
-    
-    try:
-        # Convert the chat history to the format expected by the agent
-        formatted_history = []
-        for msg in request.history:
-            if msg.get("role") == "user":
-                formatted_history.append({"type": "human", "content": msg.get("content", "")})
-            elif msg.get("role") == "assistant":
-                formatted_history.append({"type": "ai", "content": msg.get("content", "")})
+        raise HTTPException(status_code=400, detail="GOOGLE_API_KEY not configured")
         
-        # Run the agent
-        result = await agent_chain.ainvoke({
-            "input": request.message,
-            "chat_history": formatted_history
-        })
-        
-        # Extract the response
-        response = result.get("output", "I couldn't process your request.")
-        
-        # Extract tool calls if available
-        tool_calls = result.get("intermediate_steps", [])
-        formatted_tool_calls = []
-        
-        for action, output in tool_calls:
-            formatted_tool_calls.append({
-                "tool": action.tool,
-                "input": action.tool_input,
-                "output": str(output)
-            })
-        
-        return {
-            "response": response,
-            "tool_calls": formatted_tool_calls
-        }
-    except Exception as e:
-        logger.error(f"Error processing chat: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error processing chat: {str(e)}")
+    data = {
+        "message": chat_input.message,
+        "history": chat_input.history
+    }
+    return await make_request("/api/chat", method="POST", data=data)
 
-@app.post("/run-prompt", response_model=PromptResponse)
-async def run_prompt(request: PromptRequest):
-    """Run a predefined MCP prompt"""
-    try:
-        # Run the prompt using the MCP server
-        MCP_SERVER_URL = os.getenv("MCP_URL", "http://localhost:3000")
-        
-        import httpx
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{MCP_SERVER_URL}/api/prompts/{request.prompt_name}/execute",
-                json=request.parameters
-            )
-            response.raise_for_status()
-            result = response.json()
-        
-        return {
-            "output": result.get("output", "No output received"),
-            "tool_calls": result.get("toolCalls", [])
-        }
-    except httpx.HTTPStatusError as e:
-        logger.error(f"HTTP error running prompt: {str(e)}")
-        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
-    except Exception as e:
-        logger.error(f"Error running prompt: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error running prompt: {str(e)}")
+# Startup and shutdown events
+@app.on_event("startup")
+async def startup_event():
+    logger.info("FastAPI server started")
 
-@app.post("/execute-tool", response_model=ToolResponse)
-async def execute_tool(request: ToolRequest):
-    """Execute a specific tool directly"""
-    global tools
-    
-    if not tools:
-        try:
-            tools = await get_mcp_tools()
-        except Exception as e:
-            logger.error(f"Failed to fetch tools: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Failed to fetch tools: {str(e)}")
-    
-    # Find the requested tool
-    tool = next((t for t in tools if t.name == request.tool_name), None)
-    
-    if tool is None:
-        raise HTTPException(status_code=404, detail=f"Tool '{request.tool_name}' not found")
-    
-    try:
-        # Execute the tool
-        result = await tool.arun(**request.parameters)
-        return {"result": result}
-    except Exception as e:
-        logger.error(f"Error executing tool '{request.tool_name}': {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error executing tool: {str(e)}")
-
-# Run the server with uvicorn if executed directly
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True) 
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger.info("FastAPI server shutting down")

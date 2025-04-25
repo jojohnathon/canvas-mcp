@@ -8,6 +8,7 @@ from langchain_core.tools import tool
 from langchain_core.pydantic_v1 import BaseModel, Field, create_model
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.agents import AgentExecutor
+from langchain.chat_models import ChatOpenAI
 from langchain_google_vertexai import ChatVertexAI
 from langchain_community.agent_toolkits import create_conversational_retrieval_agent
 
@@ -24,7 +25,9 @@ load_dotenv()
 # Configuration from environment variables
 MCP_URL = os.getenv("MCP_URL", "http://localhost:3000")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 MODEL_NAME = os.getenv("MODEL_NAME", "gemini-pro")
+USE_DEEPSEEK = os.getenv("USE_DEEPSEEK", "false").lower() == "true"
 
 class DynamicTool:
     """A class to dynamically create and manage LangChain tools from MCP endpoints."""
@@ -100,16 +103,26 @@ async def get_mcp_tools() -> List[DynamicTool]:
 
 async def create_agent_chain(tools: List[DynamicTool]) -> AgentExecutor:
     """Create a LangChain agent with the provided tools"""
-    if not GOOGLE_API_KEY:
-        logger.error("GOOGLE_API_KEY environment variable not set")
-        raise ValueError("GOOGLE_API_KEY environment variable not set")
     
     # Create the language model
-    llm = ChatVertexAI(
-        model_name=MODEL_NAME,
-        temperature=0,
-        google_api_key=GOOGLE_API_KEY
-    )
+    if USE_DEEPSEEK and DEEPSEEK_API_KEY:
+        logger.info("Using DeepSeek API for the agent")
+        llm = ChatOpenAI(
+            model="deepseek-chat",
+            temperature=0,
+            api_key=DEEPSEEK_API_KEY,
+            base_url="https://api.deepseek.com/v1"
+        )
+    elif GOOGLE_API_KEY:
+        logger.info("Using Google Vertex AI for the agent")
+        llm = ChatVertexAI(
+            model_name=MODEL_NAME,
+            temperature=0,
+            google_api_key=GOOGLE_API_KEY
+        )
+    else:
+        logger.error("No valid API key found. Set either GOOGLE_API_KEY or DEEPSEEK_API_KEY.")
+        raise ValueError("No valid API key found. Set either GOOGLE_API_KEY or DEEPSEEK_API_KEY.")
     
     # Create the system message
     system_message = """
@@ -163,4 +176,4 @@ if __name__ == "__main__":
     # Test creating agent
     agent_chain = create_agent_chain(tools)
     if agent_chain:
-        print("Agent chain created successfully") 
+        print("Agent chain created successfully")
