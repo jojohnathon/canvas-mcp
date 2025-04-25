@@ -5,15 +5,18 @@
   "main": "build/index.js",
   "scripts": {
     "build": "tsc",
-    "start": "node build/index.js"
+    "start": "node build/index.js",
+    "test-client": "node build/test-client.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.3",
     "axios": "^1.6.7",
+    "dotenv": "^16.5.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
     "@types/node": "^20.17.10",
+    "ts-node": "^10.9.2",
     "typescript": "^5.7.2"
   }
 }

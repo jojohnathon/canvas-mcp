@@ -1,0 +1,55 @@
+body {
+  background-color: #f8f9fa;
+}
+
+.card {
+  box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+}
+
+pre {
+  max-height: 400px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+#resultContent {
+  background-color: #f8f9fa;
+  border-radius: 0.25rem;
+}
+
+.tool-argument {
+  margin-bottom: 1rem;
+}
+
+.argument-label {
+  font-weight: 500;
+  margin-bottom: 0.25rem;
+}
+
+.argument-description {
+  font-size: 0.9rem;
+  color: #6c757d;
+  margin-bottom: 0.5rem;
+}
+
+#toolDescription {
+  font-size: 0.95rem;
+}
+
+.required-field label::after {
+  content: " *";
+  color: #dc3545;
+}
+
+.prompt-item {
+  cursor: pointer;
+}
+
+.prompt-item:hover {
+  background-color: #f1f1f1;
+}
+
+.prompt-description {
+  font-size: 0.9rem;
+  color: #6c757d;
+} 

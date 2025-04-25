@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -8,6 +9,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import axios from 'axios';
 import { CanvasConfig, Course, Rubric } from './types.js';
+import { StudentTools } from './studentTools.js';
 
 // Add this interface near the top of the file, with the other types
 interface RubricStat {
@@ -27,6 +29,7 @@ class CanvasServer {
   private server: Server;
   private config: CanvasConfig;
   private axiosInstance;
+  private studentTools: StudentTools;
 
   constructor(config: CanvasConfig) {
     this.config = config;
@@ -52,6 +55,9 @@ class CanvasServer {
         Authorization: `Bearer ${this.config.apiToken}`,
       },
     });
+
+    // Initialize student tools
+    this.studentTools = new StudentTools(this.config.baseUrl, this.config.apiToken);
 
     // Set up request handlers
     this.setupRequestHandlers();
@@ -269,6 +275,154 @@ class CanvasServer {
               required: ["courseId", "assignmentId"]
             }
           },
+          // Student tool definitions
+          {
+            name: "get-my-todo-items",
+            description: "Fetch the authenticated student's to-do list",
+            inputSchema: {
+              type: "object",
+              properties: {},
+              required: [],
+            },
+          },
+          {
+            name: "get-upcoming-assignments",
+            description: "Fetch upcoming assignments across all active courses for the student",
+            inputSchema: {
+              type: "object",
+              properties: {},
+              required: [],
+            },
+          },
+          {
+            name: "get-course-grade",
+            description: "Fetch student's current overall grade in a specific course",
+            inputSchema: {
+              type: "object",
+              properties: {
+                courseId: {
+                  type: "string",
+                  description: "The ID of the course"
+                }
+              },
+              required: ["courseId"],
+            },
+          },
+          {
+            name: "get-assignment-details",
+            description: "Fetch details for a specific assignment including student's submission status",
+            inputSchema: {
+              type: "object",
+              properties: {
+                courseId: {
+                  type: "string",
+                  description: "The ID of the course"
+                },
+                assignmentId: {
+                  type: "string",
+                  description: "The ID of the assignment"
+                }
+              },
+              required: ["courseId", "assignmentId"],
+            },
+          },
+          {
+            name: "get-recent-announcements",
+            description: "Fetch recent announcements from all active courses",
+            inputSchema: {
+              type: "object",
+              properties: {
+                days: {
+                  type: "number",
+                  description: "Number of days to look back (default: 14)",
+                  default: 14
+                }
+              },
+              required: [],
+            },
+          },
+          {
+            name: "list-course-modules",
+            description: "List modules and items for a course, with student completion status",
+            inputSchema: {
+              type: "object",
+              properties: {
+                courseId: {
+                  type: "string",
+                  description: "The ID of the course"
+                }
+              },
+              required: ["courseId"],
+            },
+          },
+          {
+            name: "find-course-files",
+            description: "Search files within a course",
+            inputSchema: {
+              type: "object",
+              properties: {
+                courseId: {
+                  type: "string",
+                  description: "The ID of the course"
+                },
+                searchTerm: {
+                  type: "string",
+                  description: "Term to search for in file names"
+                }
+              },
+              required: ["courseId", "searchTerm"],
+            },
+          },
+          {
+            name: "get-unread-discussions",
+            description: "List unread discussion topics for a course",
+            inputSchema: {
+              type: "object",
+              properties: {
+                courseId: {
+                  type: "string",
+                  description: "The ID of the course"
+                }
+              },
+              required: ["courseId"],
+            },
+          },
+          {
+            name: "view-discussion-topic",
+            description: "Retrieve posts/replies for a discussion topic",
+            inputSchema: {
+              type: "object",
+              properties: {
+                courseId: {
+                  type: "string",
+                  description: "The ID of the course"
+                },
+                topicId: {
+                  type: "string",
+                  description: "The ID of the discussion topic"
+                }
+              },
+              required: ["courseId", "topicId"],
+            },
+          },
+          {
+            name: "get-my-quiz-submission",
+            description: "Retrieve student's submission details for a quiz",
+            inputSchema: {
+              type: "object",
+              properties: {
+                courseId: {
+                  type: "string",
+                  description: "The ID of the course"
+                },
+                quizId: {
+                  type: "string",
+                  description: "The ID of the quiz"
+                }
+              },
+              required: ["courseId", "quizId"],
+            },
+          },
         ],
       };
     });
@@ -299,6 +453,68 @@ class CanvasServer {
             return await this.handlePostSubmissionComment(args);
           case "get-rubric-statistics":
             return await this.handleGetRubricStatistics(args);
+          // Student tool handlers
+          case "get-my-todo-items":
+            return await this.studentTools.getMyTodoItems();
+          case "get-upcoming-assignments":
+            return await this.studentTools.getUpcomingAssignments();
+          case "get-course-grade":
+            if (!args?.courseId) {
+              throw new Error("courseId is required for get-course-grade");
+            }
+            return await this.studentTools.getCourseGrade({
+              courseId: args.courseId as string
+            });
+          case "get-assignment-details":
+            if (!args?.courseId || !args?.assignmentId) {
+              throw new Error("courseId and assignmentId are required for get-assignment-details");
+            }
+            return await this.studentTools.getAssignmentDetails({
+              courseId: args.courseId as string,
+              assignmentId: args.assignmentId as string
+            });
+          case "get-recent-announcements":
+            return await this.studentTools.getRecentAnnouncements(
+              args ? { days: args.days as number } : {}
+            );
+          case "list-course-modules":
+            if (!args?.courseId) {
+              throw new Error("courseId is required for list-course-modules");
+            }
+            return await this.studentTools.listCourseModules({
+              courseId: args.courseId as string
+            });
+          case "find-course-files":
+            if (!args?.courseId || !args?.searchTerm) {
+              throw new Error("courseId and searchTerm are required for find-course-files");
+            }
+            return await this.studentTools.findCourseFiles({
+              courseId: args.courseId as string,
+              searchTerm: args.searchTerm as string
+            });
+          case "get-unread-discussions":
+            if (!args?.courseId) {
+              throw new Error("courseId is required for get-unread-discussions");
+            }
+            return await this.studentTools.getUnreadDiscussions({
+              courseId: args.courseId as string
+            });
+          case "view-discussion-topic":
+            if (!args?.courseId || !args?.topicId) {
+              throw new Error("courseId and topicId are required for view-discussion-topic");
+            }
+            return await this.studentTools.viewDiscussionTopic({
+              courseId: args.courseId as string,
+              topicId: args.topicId as string
+            });
+          case "get-my-quiz-submission":
+            if (!args?.courseId || !args?.quizId) {
+              throw new Error("courseId and quizId are required for get-my-quiz-submission");
+            }
+            return await this.studentTools.getMyQuizSubmission({
+              courseId: args.courseId as string,
+              quizId: args.quizId as string
+            });
           default:
             throw new Error(`Unknown tool: ${name}`);
         }
@@ -326,6 +542,50 @@ class CanvasServer {
               {
                 name: "courseName",
                 description: "The name of the course to analyze",
+                required: true
+              }
+            ]
+          },
+          // Student-focused prompts
+          {
+            name: "summarize-upcoming-week",
+            description: "Summarize assignments and events due soon",
+            arguments: []
+          },
+          {
+            name: "check-my-grades",
+            description: "Report current overall grade for specified courses",
+            arguments: [
+              {
+                name: "courseName",
+                description: "Name of the course (or 'all' for all active courses)",
+                required: true
+              }
+            ]
+          },
+          {
+            name: "find-lecture-slides",
+            description: "Find lecture slides or notes in a course",
+            arguments: [
+              {
+                name: "courseName",
+                description: "Name of the course to search in",
+                required: true
+              },
+              {
+                name: "topic",
+                description: "Topic to search for in the file names",
+                required: true
+              }
+            ]
+          },
+          {
+            name: "what-did-i-miss",
+            description: "Summarize recent course activity",
+            arguments: [
+              {
+                name: "courseName",
+                description: "Name of the course to check recent activity",
                 required: true
               }
             ]
@@ -385,6 +645,161 @@ Please ensure all visualizations are clearly labeled with:
 - Legend showing assignments and score levels
 - Clear distinction between assignments
 - Percentage or count indicators where appropriate`
+              }
+            }
+          ]
+        };
+      }
+      else if (request.params.name === "summarize-upcoming-week") {
+        return {
+          messages: [
+            {
+              role: "user", 
+              content: {
+                type: "text",
+                text: `Please provide a summary of my upcoming assignments and tasks for the next week. Follow these steps:
+
+1. Use the get-my-todo-items tool to fetch my current to-do list.
+
+2. Use the get-upcoming-assignments tool to fetch assignments due soon across all my courses.
+
+3. Organize and synthesize this information into a clear, prioritized summary that includes:
+   - Items due today (highest priority)
+   - Items due in the next 3 days (high priority)
+   - Items due in 4-7 days (medium priority)
+   - Longer-term items I should be aware of (lower priority)
+
+4. For each item, include:
+   - Assignment/task name
+   - Course name
+   - Due date and time
+   - Points possible (if applicable)
+   - Submission status (if already submitted)
+
+5. Add a brief summary section at the beginning highlighting:
+   - Total number of upcoming items
+   - Number of items due this week
+   - Any high-point assignments that deserve special attention
+   - Any patterns or clusters of due dates I should be aware of
+   
+Please format the information in a clean, scannable way, sorted by due date within each priority level.`
+              }
+            }
+          ]
+        };
+      }
+      else if (request.params.name === "check-my-grades") {
+        const courseName = request.params.arguments?.courseName;
+        
+        return {
+          messages: [
+            {
+              role: "user",
+              content: {
+                type: "text",
+                text: `Please check and report my current grades. Follow these steps:
+
+1. Use the list-courses tool to find all my active courses.
+
+2. ${courseName?.toLowerCase() === 'all' ? 
+                   `For each active course, use the get-course-grade tool to fetch my current grade information.` : 
+                   `Find the course ID for "${courseName}" and use the get-course-grade tool to fetch my current grade information for that specific course.`}
+
+3. Present the grade information in a clear format that includes:
+   - Course name
+   - Current grade (letter grade if available)
+   - Current score (percentage)
+   - Final grade (if different from current grade)
+   - Final score (if different from current score)
+   
+4. If grades are missing or unavailable for any courses, note this clearly.
+
+5. Include a brief summary highlighting:
+   - My highest performing course(s)
+   - Any courses where my grade might be concerning
+   - Overall GPA if that information is calculable
+
+Please present this information in a straightforward manner that helps me understand my current academic standing.`
+              }
+            }
+          ]
+        };
+      }
+      else if (request.params.name === "find-lecture-slides") {
+        const courseName = request.params.arguments?.courseName;
+        const topic = request.params.arguments?.topic;
+        
+        return {
+          messages: [
+            {
+              role: "user",
+              content: {
+                type: "text",
+                text: `Please help me find lecture slides or notes about "${topic}" in my "${courseName}" course. Follow these steps:
+
+1. Use the list-courses tool to find the course ID for "${courseName}".
+
+2. Once you have the course ID, use the find-course-files tool to search for files related to "${topic}" within that course.
+   - Use "${topic}" as the search term
+   - Pay special attention to PDF, PowerPoint, or other document files that might contain lecture materials
+
+3. If the initial search doesn't yield relevant results, try these alternative search terms related to "${topic}":
+   - Try different forms of the word (plural/singular)
+   - Try synonyms or related concepts
+   - Try searching for "lecture" + "${topic}"
+   - Try searching for "notes" + "${topic}"
+
+4. For each relevant file found, provide:
+   - File name
+   - File type
+   - File size
+   - Date created or modified
+   - Direct URL to access the file
+
+5. If multiple related files are found, suggest which might be most relevant based on:
+   - How recently they were added
+   - File names that suggest comprehensive content
+   - File types that suggest presentation materials
+
+Please present the results in a clear, organized format that helps me quickly identify the most relevant lecture materials.`
+              }
+            }
+          ]
+        };
+      }
+      else if (request.params.name === "what-did-i-miss") {
+        const courseName = request.params.arguments?.courseName;
+        
+        return {
+          messages: [
+            {
+              role: "user",
+              content: {
+                type: "text",
+                text: `Please summarize recent activity in my "${courseName}" course to help me catch up on what I might have missed. Follow these steps:
+
+1. Use the list-courses tool to find the course ID for "${courseName}".
+
+2. Once you have the course ID, gather information about recent course activity:
+   - Use the get-recent-announcements tool to fetch recent announcements
+   - Use the get-unread-discussions tool to identify discussion topics I haven't read
+   - For any unread discussions that seem particularly important, use the view-discussion-topic tool to see their content
+
+3. Organize this information into a comprehensive summary of recent course activity:
+   - Important announcements from the instructor
+   - Key discussion topics and themes
+   - Any mentioned deadlines, changes to the syllabus, or important events
+   - Required actions I need to take
+
+4. Prioritize the information based on:
+   - Recency (newest first)
+   - Importance (instructor announcements usually most important)
+   - Relevance to upcoming assignments or assessments
+   - Activity level (discussions with many replies may be more significant)
+
+5. Include a brief "Action Items" section highlighting any specific tasks I should complete to catch up.
+
+Please present this information in a clear, concise format that helps me quickly understand what's been happening in the course and what I need to do next.`
               }
             }
           ]
