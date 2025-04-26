@@ -6,29 +6,21 @@ import {
   ListToolsRequestSchema,
   ListPromptsRequestSchema,
   GetPromptRequestSchema,
+  GetPromptResultSchema, // Corrected import: Use GetPromptResultSchema
 } from "@modelcontextprotocol/sdk/types.js";
-import axios from 'axios';
+import axios, { AxiosInstance } from 'axios';
 import { CanvasConfig, Course, Rubric } from './types.js';
 import { StudentTools } from './studentTools.js';
+import { z } from 'zod';
 
-// Add this interface near the top of the file, with the other types
-interface RubricStat {
-  id: string;
-  description: string;
-  points_possible: number;
-  total_assessments: number;
-  average_score: number;
-  median_score: number;
-  min_score: number;
-  max_score: number;
-  point_distribution?: { [key: number]: number };
-}
+// Helper function for delay
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Handles integration with Canvas LMS through Model Context Protocol
 class CanvasServer {
   private server: Server;
   private config: CanvasConfig;
-  private axiosInstance;
+  private axiosInstance: AxiosInstance;
   private studentTools: StudentTools;
 
   constructor(config: CanvasConfig) {
@@ -67,7 +59,7 @@ class CanvasServer {
   private setupRequestHandlers() {
     // List available tools
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
-      console.error("Received ListToolsRequest"); // Log when the handler is invoked
+      console.error("Received ListToolsRequest");
       const toolsResponse = {
         tools: [
           {
@@ -80,28 +72,6 @@ class CanvasServer {
             },
           },
           {
-            name: "post-announcement",
-            description: "Post an announcement to a specific course",
-            inputSchema: {
-              type: "object",
-              properties: {
-                courseId: {
-                  type: "string",
-                  description: "The ID of the course",
-                },
-                title: {
-                  type: "string",
-                  description: "The title of the announcement",
-                },
-                message: {
-                  type: "string",
-                  description: "The content of the announcement",
-                },
-              },
-              required: ["courseId", "title", "message"],
-            },
-          },
-          {
             name: "list-rubrics",
             description: "List all rubrics for a specific course",
             inputSchema: {
@@ -111,25 +81,6 @@ class CanvasServer {
                   type: "string",
                   description: "The ID of the course",
                 },
-              },
-              required: ["courseId"],
-            },
-          },
-          {
-            name: "list-students",
-            description: "Get a complete list of all students enrolled in a specific course",
-            inputSchema: {
-              type: "object",
-              properties: {
-                courseId: {
-                  type: "string",
-                  description: "The ID of the course",
-                },
-                includeEmail: {
-                  type: "boolean",
-                  description: "Whether to include student email addresses",
-                  default: false
-                }
               },
               required: ["courseId"],
             },
@@ -159,56 +110,6 @@ class CanvasServer {
             }
           },
           {
-            name: "list-assignment-submissions",
-            description: "Get all student submissions and comments for a specific assignment",
-            inputSchema: {
-              type: "object",
-              properties: {
-                courseId: {
-                  type: "string",
-                  description: "The ID of the course"
-                },
-                assignmentId: {
-                  type: "string",
-                  description: "The ID of the assignment"
-                },
-                includeComments: {
-                  type: "boolean",
-                  description: "Whether to include submission comments",
-                  default: true
-                }
-              },
-              required: ["courseId", "assignmentId"]
-            }
-          },
-          {
-            name: "list-section-submissions",
-            description: "Get all student submissions for a specific assignment filtered by section",
-            inputSchema: {
-              type: "object",
-              properties: {
-                courseId: {
-                  type: "string",
-                  description: "The ID of the course"
-                },
-                assignmentId: {
-                  type: "string",
-                  description: "The ID of the assignment"
-                },
-                sectionId: {
-                  type: "string",
-                  description: "The ID of the section"
-                },
-                includeComments: {
-                  type: "boolean",
-                  description: "Whether to include submission comments",
-                  default: true
-                }
-              },
-              required: ["courseId", "assignmentId", "sectionId"]
-            }
-          },
-          {
             name: "list-sections",
             description: "Get a list of all sections in a course",
             inputSchema: {
@@ -227,56 +128,6 @@ class CanvasServer {
               required: ["courseId"]
             }
           },
-          {
-            name: "post-submission-comment",
-            description: "Post a comment on a student's assignment submission",
-            inputSchema: {
-              type: "object",
-              properties: {
-                courseId: {
-                  type: "string",
-                  description: "The ID of the course"
-                },
-                assignmentId: {
-                  type: "string", 
-                  description: "The ID of the assignment"
-                },
-                studentId: {
-                  type: "string",
-                  description: "The ID of the student"
-                },
-                comment: {
-                  type: "string",
-                  description: "The comment text to post"
-                }
-              },
-              required: ["courseId", "assignmentId", "studentId", "comment"]
-            }
-          },
-          {
-            name: "get-rubric-statistics",
-            description: "Get statistics for rubric assessments on an assignment",
-            inputSchema: {
-              type: "object",
-              properties: {
-                courseId: {
-                  type: "string",
-                  description: "The ID of the course"
-                },
-                assignmentId: {
-                  type: "string",
-                  description: "The ID of the assignment"
-                },
-                includePointDistribution: {
-                  type: "boolean",
-                  description: "Whether to include point distribution for each criterion",
-                  default: true
-                }
-              },
-              required: ["courseId", "assignmentId"]
-            }
-          },
-          // Student tool definitions
           {
             name: "get-my-todo-items",
             description: "Fetch the authenticated student's to-do list",
@@ -426,48 +277,29 @@ class CanvasServer {
           },
         ],
       };
-      console.error("Sending ListToolsResponse:", JSON.stringify(toolsResponse).substring(0, 200) + '...'); // Log the response being sent
+      console.error("Sending ListToolsResponse:", JSON.stringify(toolsResponse).substring(0, 200) + '...');
       return toolsResponse;
     });
 
     // Handle tool execution
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
-      console.error(`Received CallToolRequest for: ${name} with args: ${JSON.stringify(args)}`); // Log request
+      console.error(`Received CallToolRequest for: ${name} with args: ${JSON.stringify(args)}`);
 
       try {
         switch (name) {
           case "list-courses":
             return await this.handleListCourses();
 
-          case "post-announcement":
-            return await this.handlePostAnnouncement(args);
-
           case "list-rubrics":
             return await this.handleListRubrics(args);
-
-          case "list-students":
-            return await this.handleListStudents(args);
 
           case "list-assignments":
             return await this.handleListAssignments(args);
 
-          case "list-assignment-submissions":
-            return await this.handleListAssignmentSubmissions(args);
-
-          case "list-section-submissions":
-            return await this.handleListSectionSubmissions(args);
-
           case "list-sections":
             return await this.handleListSections(args);
 
-          case "post-submission-comment":
-            return await this.handlePostSubmissionComment(args);
-
-          case "get-rubric-statistics":
-            return await this.handleGetRubricStatistics(args);
-
-          // Student tool handlers
           case "get-my-todo-items":
             return await this.studentTools.getMyTodoItems();
 
@@ -523,7 +355,7 @@ class CanvasServer {
             throw new Error(`Unknown tool: ${name}`);
         }
       } catch (error: any) {
-        console.error(`Error executing tool '${name}':`, error); // Log error with tool name
+        console.error(`Error executing tool '${name}':`, error);
         return {
           error: {
             code: -32000,
@@ -548,7 +380,6 @@ class CanvasServer {
               }
             ]
           },
-          // Student-focused prompts
           {
             name: "summarize-upcoming-week",
             description: "Summarize assignments and events due soon",
@@ -596,10 +427,13 @@ class CanvasServer {
       };
     });
 
-    this.server.setRequestHandler(GetPromptRequestSchema, async (request) => {
-      if (request.params.name === "analyze-rubric-statistics") {
-        const courseName = request.params.arguments?.courseName;
-        const today = new Date().toISOString().split('T')[0]; // Format: YYYY-MM-DD
+    this.server.setRequestHandler(GetPromptRequestSchema, async (request, extra): Promise<z.infer<typeof GetPromptResultSchema>> => {
+      const promptName = request.params.name;
+      const promptArgs = request.params.arguments;
+
+      if (promptName === "analyze-rubric-statistics") {
+        const courseName = promptArgs?.courseName;
+        const today = new Date().toISOString().split('T')[0];
         
         return {
           messages: [
@@ -652,7 +486,7 @@ Please ensure all visualizations are clearly labeled with:
           ]
         };
       }
-      else if (request.params.name === "summarize-upcoming-week") {
+      else if (promptName === "summarize-upcoming-week") {
         return {
           messages: [
             {
@@ -690,8 +524,8 @@ Please format the information in a clean, scannable way, sorted by due date with
           ]
         };
       }
-      else if (request.params.name === "check-my-grades") {
-        const courseName = request.params.arguments?.courseName;
+      else if (promptName === "check-my-grades") {
+        const courseName = promptArgs?.courseName;
         
         return {
           messages: [
@@ -727,9 +561,9 @@ Please present this information in a straightforward manner that helps me unders
           ]
         };
       }
-      else if (request.params.name === "find-lecture-slides") {
-        const courseName = request.params.arguments?.courseName;
-        const topic = request.params.arguments?.topic;
+      else if (promptName === "find-lecture-slides") {
+        const courseName = promptArgs?.courseName;
+        const topic = promptArgs?.topic;
         
         return {
           messages: [
@@ -769,8 +603,8 @@ Please present the results in a clear, organized format that helps me quickly id
           ]
         };
       }
-      else if (request.params.name === "what-did-i-miss") {
-        const courseName = request.params.arguments?.courseName;
+      else if (promptName === "what-did-i-miss") {
+        const courseName = promptArgs?.courseName;
         
         return {
           messages: [
@@ -808,80 +642,91 @@ Please present this information in a clear, concise format that helps me quickly
         };
       }
       
-      throw new Error(`Unknown prompt: ${request.params.name}`);
+      // If prompt name doesn't match, return an empty messages array
+      // This satisfies the schema requirement for a 'messages' property.
+      console.error(`Unknown prompt requested: ${promptName}`);
+      return {
+        messages: [] 
+      };
     });
   }
 
   // Fetches and formats a list of all active courses from Canvas
   private async handleListCourses() {
-    try {
-      // Get all active courses with pagination
-      const response = await this.axiosInstance.get('/api/v1/courses', {
-        params: {
-          enrollment_state: 'active', // Only get active enrollments
-          state: ['available'], // Only get available courses
-          per_page: 100, // Get up to 100 courses per page
-          include: ['term'] // Include term info to help identify current courses
-        }
-      });
+    const maxRetries = 2; // Retry up to 2 times (3 attempts total)
+    const retryDelay = 1000; // 1 second delay between retries
 
-      const courses: Course[] = response.data;
-
-      // Filter and format the courses
-      const formattedCourses = courses
-        .filter(course => course.workflow_state === 'available')
-        .map((course: Course) => {
-          const termInfo = course.term ? ` (${course.term.name})` : '';
-          return `Course: ${course.name}${termInfo}\nID: ${course.id}\nCode: ${course.course_code}\n---`;
-        })
-        .join('\n');
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: formattedCourses ? 
-              `Available Courses:\n\n${formattedCourses}` :
-              "No active courses found.",
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        console.error(`Attempt ${attempt + 1} to fetch courses...`); // Log attempt
+        const response = await this.axiosInstance.get('/api/v1/courses', {
+          params: {
+            enrollment_state: 'active',
+            state: ['available'],
+            per_page: 100,
+            include: ['term']
           },
-        ],
-      };
-    } catch (error) {
-      if (error instanceof Error) {
-        throw new Error(`Failed to fetch courses: ${error.message}`);
-      }
-      throw new Error('Failed to fetch courses: Unknown error');
-    }
-  }
+          timeout: 15000 // Keep the 15-second timeout
+        });
 
-  // Creates a new announcement in the specified course
-  private async handlePostAnnouncement(args: any) {
-    const { courseId, title, message } = args;
+        const courses: Course[] = response.data;
 
-    try {
-      await this.axiosInstance.post(
-        `/api/v1/courses/${courseId}/discussion_topics`,
-        {
-          title,
-          message,
-          is_announcement: true,
+        const formattedCourses = courses
+          .filter(course => course.workflow_state === 'available')
+          .map((course: Course) => {
+            const termInfo = course.term ? ` (${course.term.name})` : '';
+            return `Course: ${course.name}${termInfo}\nID: ${course.id}\nCode: ${course.course_code}\n---`;
+          })
+          .join('\n');
+
+        // Success, return the result
+        return {
+          content: [
+            {
+              type: "text",
+              text: formattedCourses ?
+                `Available Courses:\n\n${formattedCourses}` :
+                "No active courses found.",
+            },
+          ],
+        };
+      } catch (error: unknown) {
+        console.error(`Attempt ${attempt + 1} failed.`); // Log failure
+
+        // Check if it's an Axios error and specifically ECONNRESET
+        if (axios.isAxiosError(error) && error.code === 'ECONNRESET') {
+          console.error(`Axios ECONNRESET error fetching courses (Attempt ${attempt + 1}/${maxRetries + 1}): ${error.message}`);
+          if (attempt < maxRetries) {
+            console.error(`Retrying in ${retryDelay / 1000} second(s)...`);
+            await delay(retryDelay); // Wait before retrying
+            continue; // Go to the next iteration of the loop
+          } else {
+            console.error("Max retries reached for ECONNRESET.");
+            // Fall through to throw the error after max retries
+          }
+        } else {
+           // Log other errors (Axios or non-Axios)
+           if (axios.isAxiosError(error)) {
+             console.error(`Axios error fetching courses: ${error.message}`, error.code, error.config?.url);
+           } else {
+             console.error("Non-Axios error fetching courses:", error);
+           }
+           // Don't retry for non-ECONNRESET errors, re-throw immediately
+           if (error instanceof Error) {
+             throw new Error(`Failed to fetch courses: ${error.message}`);
+           }
+           throw new Error('Failed to fetch courses: Unknown error');
         }
-      );
 
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Successfully posted announcement "${title}" to course ${courseId}`,
-          },
-        ],
-      };
-    } catch (error) {
-      if (error instanceof Error) {
-        throw new Error(`Failed to post announcement: ${error.message}`);
+        // If loop finishes due to max retries on ECONNRESET, throw the last error
+        if (error instanceof Error) {
+          throw new Error(`Failed to fetch courses after ${maxRetries + 1} attempts: ${error.message}`);
+        }
+        throw new Error(`Failed to fetch courses after ${maxRetries + 1} attempts: Unknown error`);
       }
-      throw new Error('Failed to post announcement: Unknown error');
     }
+    // This part should theoretically not be reached due to return/throw inside the loop
+    throw new Error('handleListCourses exited loop unexpectedly.');
   }
 
   // Retrieves all rubrics associated with the specified course
@@ -906,7 +751,7 @@ Please present this information in a clear, concise format that helps me quickly
           },
         ],
       };
-    } catch (error) {
+    } catch (error: unknown) {
       if (error instanceof Error) {
         throw new Error(`Failed to fetch rubrics: ${error.message}`);
       }
@@ -914,82 +759,14 @@ Please present this information in a clear, concise format that helps me quickly
     }
   }
 
-  // Fetches a complete list of enrolled students for the specified course
-  private async handleListStudents(args: any) {
-    const { courseId, includeEmail = false } = args;
-    const students = [];
-    let page = 1;
-    let hasMore = true;
-
-    try {
-      // Fetch all pages of students
-      while (hasMore) {
-        const response = await this.axiosInstance.get(
-          `/api/v1/courses/${courseId}/users`,
-          {
-            params: {
-              enrollment_type: ['student'], // Only get students
-              per_page: 100, // Maximum page size
-              page: page,
-              include: ['email', 'avatar_url'], // Added avatar_url to includes
-              enrollment_state: ['active', 'invited'] // Get both active and invited students
-            }
-          }
-        );
-
-        const pageStudents = response.data;
-        students.push(...pageStudents);
-
-        // Check if there are more pages
-        hasMore = pageStudents.length === 100;
-        page += 1;
-      }
-
-      // Format the student list
-      const formattedStudents = students
-        .map(student => {
-          const parts = [
-            `Name: ${student.name}`,
-            `ID: ${student.id}`,
-            `SIS ID: ${student.sis_user_id || 'N/A'}`,
-            `Avatar URL: ${student.avatar_url || 'N/A'}`  // Added avatar URL
-          ];
-          
-          if (includeEmail && student.email) {
-            parts.push(`Email: ${student.email}`);
-          }
-          
-          return parts.join('\n');
-        })
-        .join('\n---\n');
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: students.length > 0 
-              ? `Students in course ${courseId}:\n\n${formattedStudents}\n\nTotal students: ${students.length}`
-              : "No students found in this course.",
-          },
-        ],
-      };
-    } catch (error) {
-      if (error instanceof Error) {
-        throw new Error(`Failed to fetch students: ${error.message}`);
-      }
-      throw new Error('Failed to fetch students: Unknown error');
-    }
-  }
-
   // Gets all assignments for a course with optional student submission details
   private async handleListAssignments(args: any) {
     const { courseId, studentId, includeSubmissionHistory = false } = args;
-    let assignments = [];
+    let assignments: any[] = [];
     let page = 1;
     let hasMore = true;
 
     try {
-      // Fetch all pages of assignments with submission and comment data
       while (hasMore) {
         const response = await this.axiosInstance.get(
           `/api/v1/courses/${courseId}/assignments`,
@@ -997,7 +774,6 @@ Please present this information in a clear, concise format that helps me quickly
             params: {
               per_page: 100,
               page: page,
-              // Always include submission history when studentId is provided
               include: studentId ? ['submission', 'submission_comments', 'submission_history'] : [],
               student_ids: studentId ? [studentId] : undefined,
               order_by: 'position',
@@ -1014,7 +790,6 @@ Please present this information in a clear, concise format that helps me quickly
         page += 1;
       }
 
-      // Format the assignments list
       const formattedAssignments = assignments
         .map(assignment => {
           const parts = [
@@ -1046,7 +821,6 @@ Please present this information in a clear, concise format that helps me quickly
             parts.push('  Teacher Comments: None');
           }
 
-          // Enhanced submission history handling
           if (includeSubmissionHistory && assignment.submission.versioned_submissions?.length > 0) {
             parts.push('  Submission History:');
             assignment.submission.versioned_submissions
@@ -1095,208 +869,14 @@ Please present this information in a clear, concise format that helps me quickly
     }
   }
 
-  // Retrieves all student submissions for a specific assignment
-  private async handleListAssignmentSubmissions(args: any) {
-    const { courseId, assignmentId, includeComments = true } = args;
-    let submissions = [];
-    let page = 1;
-    let hasMore = true;
-
-    try {
-      while (hasMore) {
-        const response = await this.axiosInstance.get(
-          `/api/v1/courses/${courseId}/assignments/${assignmentId}/submissions`,
-          {
-            params: {
-              per_page: 100,
-              page: page,
-              include: [
-                'user',  // Include user information
-                'submission_comments', // Include comments
-                'assignment' // Include assignment details
-              ]
-            }
-          }
-        );
-
-        const pageSubmissions = response.data;
-        submissions.push(...pageSubmissions);
-
-        hasMore = pageSubmissions.length === 100;
-        page += 1;
-      }
-
-      // Format the submissions list
-      const formattedSubmissions = submissions
-        .map(submission => {
-          const parts = [
-            `Student: ${submission.user?.name || 'Unknown'}`,
-            `Status: ${submission.workflow_state}`,
-            `Submitted: ${submission.submitted_at ? new Date(submission.submitted_at).toLocaleString() : 'Not submitted'}`,
-            `Grade: ${submission.grade || 'No grade'}`,
-            `Score: ${submission.score !== undefined ? submission.score : 'No score'}`
-          ];
-
-          if (submission.late) {
-            parts.push('Late: Yes');
-          }
-
-          if (submission.missing) {
-            parts.push('Missing: Yes');
-          }
-
-          if (submission.submission_type) {
-            parts.push(`Submission Type: ${submission.submission_type}`);
-          }
-
-          // Add submission comments if requested
-          if (includeComments && submission.submission_comments?.length > 0) {
-            parts.push('\nComments:');
-            submission.submission_comments.forEach((comment: any) => {
-              const date = new Date(comment.created_at).toLocaleString();
-              const author = comment.author?.display_name || 'Unknown';
-              const role = comment.author?.role || 'unknown role';
-              parts.push(`  [${date}] ${author} (${role}):`);
-              parts.push(`    ${comment.comment}`);
-            });
-          }
-
-          return parts.join('\n');
-        })
-        .join('\n---\n');
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: submissions.length > 0
-              ? `Submissions for assignment ${assignmentId} in course ${courseId}:\n\n${formattedSubmissions}\n\nTotal submissions: ${submissions.length}`
-              : "No submissions found for this assignment.",
-          },
-        ],
-      };
-    } catch (error: any) {
-      console.error('Full error details:', error.response?.data || error);
-      if (error.response?.data?.errors) {
-        throw new Error(`Failed to fetch submissions: ${JSON.stringify(error.response.data.errors)}`);
-      }
-      if (error instanceof Error) {
-        throw new Error(`Failed to fetch submissions: ${error.message}`);
-      }
-      throw new Error('Failed to fetch submissions: Unknown error');
-    }
-  }
-
-  // Retrieves all student submissions for a specific assignment filtered by section
-  private async handleListSectionSubmissions(args: any) {
-    const { courseId, assignmentId, sectionId, includeComments = true } = args;
-    let submissions = [];
-    let page = 1;
-    let hasMore = true;
-
-    try {
-      // First verify the section exists in the course
-      await this.axiosInstance.get(
-        `/api/v1/courses/${courseId}/sections/${sectionId}`
-      );
-
-      // Fetch submissions for the section
-      while (hasMore) {
-        const response = await this.axiosInstance.get(
-          `/api/v1/sections/${sectionId}/assignments/${assignmentId}/submissions`,
-          {
-            params: {
-              per_page: 100,
-              page: page,
-              include: [
-                'user',
-                'submission_comments',
-                'assignment'
-              ]
-            }
-          }
-        );
-
-        const pageSubmissions = response.data;
-        submissions.push(...pageSubmissions);
-
-        hasMore = pageSubmissions.length === 100;
-        page += 1;
-      }
-
-      // Format the submissions list
-      const formattedSubmissions = submissions
-        .map(submission => {
-          const parts = [
-            `Student: ${submission.user?.name || 'Unknown'}`,
-            `Status: ${submission.workflow_state}`,
-            `Submitted: ${submission.submitted_at ? new Date(submission.submitted_at).toLocaleString() : 'Not submitted'}`,
-            `Grade: ${submission.grade || 'No grade'}`,
-            `Score: ${submission.score !== undefined ? submission.score : 'No score'}`
-          ];
-
-          if (submission.late) {
-            parts.push('Late: Yes');
-          }
-
-          if (submission.missing) {
-            parts.push('Missing: Yes');
-          }
-
-          if (submission.submission_type) {
-            parts.push(`Submission Type: ${submission.submission_type}`);
-          }
-
-          // Add submission comments if requested
-          if (includeComments && submission.submission_comments?.length > 0) {
-            parts.push('\nComments:');
-            submission.submission_comments.forEach((comment: any) => {
-              const date = new Date(comment.created_at).toLocaleString();
-              const author = comment.author?.display_name || 'Unknown';
-              const role = comment.author?.role || 'unknown role';
-              parts.push(`  [${date}] ${author} (${role}):`);
-              parts.push(`    ${comment.comment}`);
-            });
-          }
-
-          return parts.join('\n');
-        })
-        .join('\n---\n');
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: submissions.length > 0
-              ? `Submissions for assignment ${assignmentId} in section ${sectionId}:\n\n${formattedSubmissions}\n\nTotal submissions: ${submissions.length}`
-              : "No submissions found for this assignment in this section.",
-          },
-        ],
-      };
-    } catch (error: any) {
-      console.error('Full error details:', error.response?.data || error);
-      if (error.response?.status === 404) {
-        throw new Error(`Section ${sectionId} not found in course ${courseId}`);
-      }
-      if (error.response?.data?.errors) {
-        throw new Error(`Failed to fetch section submissions: ${JSON.stringify(error.response.data.errors)}`);
-      }
-      if (error instanceof Error) {
-        throw new Error(`Failed to fetch section submissions: ${error.message}`);
-      }
-      throw new Error('Failed to fetch section submissions: Unknown error');
-    }
-  }
-
-  // Retrieves all student submissions for a specific assignment filtered by section
+  // Retrieves all sections for a course
   private async handleListSections(args: any) {
     const { courseId, includeStudentCount = false } = args;
-    let sections = [];
+    let sections: any[] = [];
     let page = 1;
     let hasMore = true;
 
     try {
-      // Fetch all pages of sections
       while (hasMore) {
         const response = await this.axiosInstance.get(
           `/api/v1/courses/${courseId}/sections`,
@@ -1316,7 +896,6 @@ Please present this information in a clear, concise format that helps me quickly
         page += 1;
       }
 
-      // Format the sections list
       const formattedSections = sections
         .map(section => {
           const parts = [
@@ -1369,202 +948,6 @@ Please present this information in a clear, concise format that helps me quickly
     }
   }
 
-  // Posts a comment on a student's assignment submission
-  private async handlePostSubmissionComment(args: any) {
-    const { courseId, assignmentId, studentId, comment } = args;
-
-    try {
-      // Post the comment to the submission
-      await this.axiosInstance.put(
-        `/api/v1/courses/${courseId}/assignments/${assignmentId}/submissions/${studentId}/comments`,
-        {
-          comment: {
-            text_comment: comment
-          }
-        }
-      );
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Successfully posted comment for student ${studentId} on assignment ${assignmentId}`
-          }
-        ]
-      };
-    } catch (error: any) {
-      console.error('Full error details:', error.response?.data || error);
-      if (error.response?.status === 404) {
-        throw new Error(`Could not find submission for student ${studentId} on assignment ${assignmentId} in course ${courseId}`);
-      }
-      if (error.response?.data?.errors) {
-        throw new Error(`Failed to post comment: ${JSON.stringify(error.response.data.errors)}`);
-      }
-      if (error instanceof Error) {
-        throw new Error(`Failed to post comment: ${error.message}`);
-      }
-      throw new Error('Failed to post comment: Unknown error');
-    }
-  }
-
-  // Handles rubric statistics for an assignment
-  private async handleGetRubricStatistics(args: any) {
-    const { courseId, assignmentId, includePointDistribution = true } = args;
-
-    try {
-      // First get the assignment details with rubric
-      const assignmentResponse = await this.axiosInstance.get(
-        `/api/v1/courses/${courseId}/assignments/${assignmentId}`,
-        {
-          params: {
-            include: ['rubric']
-          }
-        }
-      );
-
-      if (!assignmentResponse.data.rubric) {
-        throw new Error('No rubric found for this assignment');
-      }
-
-      // Get all submissions with rubric assessments
-      const submissions = await this.fetchAllPages(
-        `/api/v1/courses/${courseId}/assignments/${assignmentId}/submissions`,
-        {
-          params: {
-            include: ['rubric_assessment'],
-            per_page: 100
-          }
-        }
-      );
-
-      // Calculate statistics for each rubric criterion
-      const rubricStats = assignmentResponse.data.rubric.map((criterion: any): RubricStat => {
-        const scores = submissions
-          .filter((sub: any) => sub.rubric_assessment?.[criterion.id]?.points !== undefined)
-          .map((sub: any) => sub.rubric_assessment[criterion.id].points);
-
-        const stats: RubricStat = {
-          id: criterion.id,
-          description: criterion.description,
-          points_possible: criterion.points,
-          total_assessments: scores.length,
-          average_score: 0,
-          median_score: 0,
-          min_score: 0,
-          max_score: 0
-        };
-
-        if (scores.length > 0) {
-          stats.average_score = Number((scores.reduce((a: number, b: number) => a + b, 0) / scores.length).toFixed(2));
-          stats.median_score = this.calculateMedian(scores);
-          stats.min_score = Math.min(...scores);
-          stats.max_score = Math.max(...scores);
-        }
-
-        if (includePointDistribution) {
-          // Create point distribution
-          const distribution: { [key: number]: number } = {};
-          scores.forEach((score: number) => {
-            distribution[score] = (distribution[score] || 0) + 1;
-          });
-          (stats as any).point_distribution = distribution;
-        }
-
-        return stats;
-      });
-
-      // Calculate overall statistics
-      const totalScores = submissions
-        .filter((sub: any) => sub.rubric_assessment)
-        .map((sub: any) => {
-          return Object.values(sub.rubric_assessment)
-            .reduce((sum: number, assessment: any) => sum + (assessment.points || 0), 0);
-        });
-
-      const overallStats = {
-        total_submissions: submissions.length,
-        submissions_with_assessment: totalScores.length,
-        overall_average: 0,
-        overall_median: 0,
-        overall_min: 0,
-        overall_max: 0
-      };
-
-      if (totalScores.length > 0) {
-        overallStats.overall_average = Number((totalScores.reduce((a, b) => a + b, 0) / totalScores.length).toFixed(2));
-        overallStats.overall_median = this.calculateMedian(totalScores);
-        overallStats.overall_min = Math.min(...totalScores);
-        overallStats.overall_max = Math.max(...totalScores);
-      }
-
-      // Format the output
-      const formattedStats = [
-        'Overall Statistics:',
-        `Total Submissions: ${overallStats.total_submissions}`,
-        `Submissions with Assessment: ${overallStats.submissions_with_assessment}`,
-        `Average Score: ${overallStats.overall_average}`,
-        `Median Score: ${overallStats.overall_median}`,
-        `Min Score: ${overallStats.overall_min}`,
-        `Max Score: ${overallStats.overall_max}`,
-        '\nCriterion Statistics:',
-        ...rubricStats.map((stat: RubricStat) => {
-          const parts = [
-            `\nCriterion: ${stat.description}`,
-            `Points Possible: ${stat.points_possible}`,
-            `Total Assessments: ${stat.total_assessments}`,
-            `Average Score: ${stat.average_score}`,
-            `Median Score: ${stat.median_score}`,
-            `Min Score: ${stat.min_score}`,
-            `Max Score: ${stat.max_score}`
-          ];
-
-          if (includePointDistribution && stat.point_distribution) {
-            parts.push('\nPoint Distribution:');
-            Object.entries(stat.point_distribution)
-              .sort(([a], [b]) => Number(b) - Number(a))
-              .forEach(([score, count]) => {
-                const percentage = (((count as number) / stat.total_assessments) * 100).toFixed(1);
-                parts.push(`  ${score} points: ${count} submissions (${percentage}%)`);
-              });
-          }
-
-          return parts.join('\n');
-        })
-      ].join('\n');
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: formattedStats
-          }
-        ]
-      };
-    } catch (error: any) {
-      console.error('Full error details:', error.response?.data || error);
-      if (error.response?.status === 404) {
-        throw new Error(`Assignment ${assignmentId} not found in course ${courseId}`);
-      }
-      if (error.response?.data?.errors) {
-        throw new Error(`Failed to fetch rubric statistics: ${JSON.stringify(error.response.data.errors)}`);
-      }
-      throw new Error(`Failed to fetch rubric statistics: ${error.message}`);
-    }
-  }
-
-  // Helper method to calculate median
-  private calculateMedian(numbers: number[]): number {
-    if (numbers.length === 0) return 0;
-    
-    const sorted = [...numbers].sort((a, b) => a - b);
-    const middle = Math.floor(sorted.length / 2);
-
-    if (sorted.length % 2 === 0) {
-      return Number(((sorted[middle - 1] + sorted[middle]) / 2).toFixed(2));
-    }
-    return Number(sorted[middle].toFixed(2));
-  }
-
   // Helper method to fetch all pages
   private async fetchAllPages(url: string, config: any): Promise<any[]> {
     let results: any[] = [];
@@ -1583,7 +966,8 @@ Please present this information in a clear, concise format that helps me quickly
       const pageData = response.data;
       results.push(...pageData);
 
-      hasMore = pageData.length === (config.params.per_page || 10);
+      const perPage = config?.params?.per_page || 10;
+      hasMore = pageData.length === perPage;
       page += 1;
     }
 
@@ -1593,13 +977,13 @@ Please present this information in a clear, concise format that helps me quickly
   // Starts the server using stdio transport
   public async start() {
     const transport = new StdioServerTransport();
-    console.error("Attempting to connect server to stdio transport..."); // Log before connect
+    console.error("Attempting to connect server to stdio transport...");
     try {
       await this.server.connect(transport);
-      console.error("Canvas MCP Server successfully connected and running on stdio"); // Log success
-    } catch (error) {
-      console.error("Error connecting server to stdio transport:", error); // Log connection error
-      throw error; // Re-throw error to ensure process exits if connection fails
+      console.error("Canvas MCP Server successfully connected and running on stdio");
+    } catch (error: unknown) {
+      console.error("Error connecting server to stdio transport:", error);
+      throw error;
     }
   }
 }
@@ -1618,8 +1002,8 @@ if (!config.apiToken) {
 
 // Start the server
 const server = new CanvasServer(config);
-console.error("Starting Canvas MCP Server..."); // Log before starting
-server.start().catch((error) => {
-  console.error("Fatal error during server startup:", error); // Log fatal startup errors
+console.error("Starting Canvas MCP Server...");
+server.start().catch((error: unknown) => {
+  console.error("Fatal error during server startup:", error);
   process.exit(1);
 });
