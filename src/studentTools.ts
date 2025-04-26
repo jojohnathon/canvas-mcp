@@ -1,128 +1,9 @@
-import axios, { AxiosInstance } from 'axios';
+import axios, { AxiosInstance, AxiosResponse } from 'axios';
+// Import Page type
+import { CourseFile, DiscussionTopic, Module, TodoItem, Assignment, QuizSubmission, Announcement, CourseGrade, ModuleItem, DiscussionEntry, Page } from './types.js';
 
-// Interfaces for tool input/output types
-interface TodoItem {
-  type: string;
-  assignment?: {
-    id: string;
-    name: string;
-    due_at: string;
-    points_possible: number;
-    course_id: string;
-  };
-  context_name: string;
-  course_id?: string;
-  html_url: string;
-  ignore_url?: string;
-  title?: string;
-}
-
-interface Assignment {
-  id: string;
-  name: string;
-  description: string;
-  due_at: string | null;
-  points_possible: number;
-  submission?: {
-    submitted_at: string | null;
-    score: number | null;
-    grade: string | null;
-    late: boolean;
-    missing: boolean;
-  };
-  html_url: string;
-  course_id: string;
-  course_name?: string;
-}
-
-interface CourseGrade {
-  course_id: string;
-  course_name: string;
-  current_grade: string | null;
-  current_score: number | null;
-  final_grade: string | null;
-  final_score: number | null;
-  html_url: string;
-}
-
-interface Announcement {
-  id: string;
-  title: string;
-  message: string;
-  posted_at: string;
-  course_id: string;
-  course_name: string;
-  html_url: string;
-}
-
-interface Module {
-  id: string;
-  name: string;
-  position: number;
-  items: ModuleItem[];
-  state?: string;
-  completed?: boolean;
-}
-
-interface ModuleItem {
-  id: string;
-  title: string;
-  type: string;
-  content_id: string;
-  html_url: string;
-  position: number;
-  completion_requirement?: {
-    type: string;
-    completed: boolean;
-  };
-}
-
-interface CourseFile {
-  id: string;
-  display_name: string;
-  size: number;
-  created_at: string;
-  updated_at: string;
-  content_type: string;
-  url: string;
-  thumbnail_url?: string;
-}
-
-interface DiscussionTopic {
-  id: string;
-  title: string;
-  message: string;
-  posted_at: string;
-  author_name?: string;
-  unread_count?: number;
-  html_url: string;
-  course_id?: string;
-}
-
-interface DiscussionEntry {
-  id: string;
-  user_name: string;
-  message: string;
-  created_at: string;
-  updated_at: string;
-  replies?: DiscussionEntry[];
-}
-
-interface QuizSubmission {
-  id: string;
-  quiz_id: string;
-  user_id: string;
-  submission_id: string;
-  started_at: string;
-  finished_at: string | null;
-  end_at: string | null;
-  score: number | null;
-  kept_score: number | null;
-  time_spent: number;
-  attempt: number;
-  workflow_state: string;
-  html_url: string;
-}
+// Helper function for delay
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Main class for handling student tools
 export class StudentTools {
@@ -144,12 +25,12 @@ export class StudentTools {
     try {
       const response = await this.axiosInstance.get('/api/v1/users/self/todo');
       const todoItems: TodoItem[] = response.data;
-      
+
       // Format the response for better readability in LLM context
       const formattedResult = todoItems.map(item => {
         let title = item.title || (item.assignment ? item.assignment.name : 'Untitled Item');
         let dueDate = item.assignment?.due_at ? new Date(item.assignment.due_at).toLocaleString() : 'No due date';
-        
+
         return {
           title,
           type: item.type,
@@ -164,8 +45,8 @@ export class StudentTools {
         content: [
           {
             type: "text",
-            text: todoItems.length > 0 
-              ? `To-Do Items:\n\n${formattedResult.map(item => 
+            text: todoItems.length > 0
+              ? `To-Do Items:\n\n${formattedResult.map(item =>
                 `Title: ${item.title}\nType: ${item.type}\nCourse: ${item.course_name}\nDue Date: ${item.due_date}${item.points_possible ? `\nPoints: ${item.points_possible}` : ''}\nURL: ${item.url}\n---`
               ).join('\n')}`
               : "No to-do items found.",
@@ -192,9 +73,9 @@ export class StudentTools {
           per_page: 100
         }
       });
-      
+
       const courses = coursesResponse.data;
-      
+
       // For each course, get upcoming assignments
       const assignmentPromises = courses.map(async (course: any) => {
         try {
@@ -207,7 +88,7 @@ export class StudentTools {
               }
             }
           );
-          
+
           return assignmentsResponse.data.map((assignment: any) => ({
             ...assignment,
             course_name: course.name
@@ -217,10 +98,10 @@ export class StudentTools {
           return [];
         }
       });
-      
+
       const assignmentsArrays = await Promise.all(assignmentPromises);
       const assignments: Assignment[] = assignmentsArrays.flat();
-      
+
       // Sort by due date
       assignments.sort((a, b) => {
         if (!a.due_at) return 1;
@@ -232,8 +113,8 @@ export class StudentTools {
         content: [
           {
             type: "text",
-            text: assignments.length > 0 
-              ? `Upcoming Assignments:\n\n${assignments.map(assignment => 
+            text: assignments.length > 0
+              ? `Upcoming Assignments:\n\n${assignments.map(assignment =>
                 `Assignment: ${assignment.name}\nCourse: ${assignment.course_name}\nDue Date: ${assignment.due_at ? new Date(assignment.due_at).toLocaleString() : 'No due date'}\nPoints: ${assignment.points_possible}\n${assignment.submission ? `Submitted: ${assignment.submission.submitted_at ? 'Yes' : 'No'}\nScore: ${assignment.submission.score !== null ? assignment.submission.score : 'Not graded'}` : 'No submission information'}\nURL: ${assignment.html_url}\n---`
               ).join('\n')}`
               : "No upcoming assignments found.",
@@ -253,12 +134,12 @@ export class StudentTools {
    */
   async getCourseGrade(args: { courseId: string }) {
     const { courseId } = args;
-    
+
     try {
       // Get course information
       const courseResponse = await this.axiosInstance.get(`/api/v1/courses/${courseId}`);
       const course = courseResponse.data;
-      
+
       // Get enrollment information (which includes grades)
       const enrollmentResponse = await this.axiosInstance.get(
         `/api/v1/courses/${courseId}/enrollments`, {
@@ -267,12 +148,12 @@ export class StudentTools {
           }
         }
       );
-      
+
       // Find the student enrollment
-      const studentEnrollment = enrollmentResponse.data.find((enrollment: any) => 
+      const studentEnrollment = enrollmentResponse.data.find((enrollment: any) =>
         enrollment.type === 'student' || enrollment.role === 'StudentEnrollment'
       );
-      
+
       if (!studentEnrollment) {
         return {
           content: [
@@ -283,9 +164,9 @@ export class StudentTools {
           ],
         };
       }
-      
+
       const gradeInfo: CourseGrade = {
-        course_id: courseId,
+        course_id: parseInt(courseId, 10), // Convert string to number
         course_name: course.name,
         current_grade: studentEnrollment.current_grade,
         current_score: studentEnrollment.current_score,
@@ -315,7 +196,7 @@ export class StudentTools {
    */
   async getAssignmentDetails(args: { courseId: string; assignmentId: string }) {
     const { courseId, assignmentId } = args;
-    
+
     try {
       const response = await this.axiosInstance.get(
         `/api/v1/courses/${courseId}/assignments/${assignmentId}`, {
@@ -324,10 +205,10 @@ export class StudentTools {
           }
         }
       );
-      
+
       const assignment = response.data;
       const submission = assignment.submission;
-      
+
       // Format the response for better readability
       const formattedAssignment = {
         id: assignment.id,
@@ -355,9 +236,9 @@ export class StudentTools {
         content: [
           {
             type: "text",
-            text: `Assignment Details:\n\nName: ${formattedAssignment.name}\nDue Date: ${formattedAssignment.due_at ? new Date(formattedAssignment.due_at).toLocaleString() : 'No due date'}\nPoints Possible: ${formattedAssignment.points_possible}\n\n${formattedAssignment.description ? `Description:\n${formattedAssignment.description.replace(/<[^>]*>/g, '')}\n\n` : ''}${formattedAssignment.submission_status ? 
-              `Submission Status:\nSubmitted: ${formattedAssignment.submission_status.submitted ? 'Yes' : 'No'}${formattedAssignment.submission_status.submitted_at ? `\nSubmission Date: ${new Date(formattedAssignment.submission_status.submitted_at).toLocaleString()}` : ''}${formattedAssignment.submission_status.late ? '\nStatus: Late' : ''}${formattedAssignment.submission_status.missing ? '\nStatus: Missing' : ''}\nScore: ${formattedAssignment.submission_status.score !== null ? formattedAssignment.submission_status.score : 'Not graded'}\nGrade: ${formattedAssignment.submission_status.grade || 'Not graded'}${formattedAssignment.submission_status.feedback && formattedAssignment.submission_status.feedback.length > 0 ? 
-                `\n\nFeedback:\n${formattedAssignment.submission_status.feedback.map((item: any) => `[${new Date(item.created_at).toLocaleString()}] ${item.author}: ${item.comment}`).join('\n')}` : ''}` 
+            text: `Assignment Details:\n\nName: ${formattedAssignment.name}\nDue Date: ${formattedAssignment.due_at ? new Date(formattedAssignment.due_at).toLocaleString() : 'No due date'}\nPoints Possible: ${formattedAssignment.points_possible}\n\n${formattedAssignment.description ? `Description:\n${formattedAssignment.description.replace(/<[^>]*>/g, '')}\n\n` : ''}${formattedAssignment.submission_status ?
+              `Submission Status:\nSubmitted: ${formattedAssignment.submission_status.submitted ? 'Yes' : 'No'}${formattedAssignment.submission_status.submitted_at ? `\nSubmission Date: ${new Date(formattedAssignment.submission_status.submitted_at).toLocaleString()}` : ''}${formattedAssignment.submission_status.late ? '\nStatus: Late' : ''}${formattedAssignment.submission_status.missing ? '\nStatus: Missing' : ''}\nScore: ${formattedAssignment.submission_status.score !== null ? formattedAssignment.submission_status.score : 'Not graded'}\nGrade: ${formattedAssignment.submission_status.grade || 'Not graded'}${formattedAssignment.submission_status.feedback && formattedAssignment.submission_status.feedback.length > 0 ?
+                `\n\nFeedback:\n${formattedAssignment.submission_status.feedback.map((item: any) => `[${new Date(item.created_at).toLocaleString()}] ${item.author}: ${item.comment}`).join('\n')}` : ''}`
               : 'No submission information available.'}\n\nURL: ${formattedAssignment.html_url}`,
           },
         ],
@@ -371,392 +252,439 @@ export class StudentTools {
   }
 
   /**
-   * Fetch recent announcements from all active courses
+   * Fetch recent announcements from all active courses or a specific course
    */
-  async getRecentAnnouncements(args: { days?: number } = {}) {
-    const { days = 14 } = args; // Default to 14 days if not specified
-    
+  async getRecentAnnouncements(args?: { days?: number; courseId?: string }): Promise<{ content: { type: string; text: string }[] }> {
+    const days = args?.days || 14;
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(endDate.getDate() - days);
+
+    const params: any = {
+      start_date: startDate.toISOString(),
+      end_date: endDate.toISOString(),
+      per_page: 50,
+      active_only: true,
+    };
+
+    let contextCodes: string[] = [];
+    let courseMap = new Map<number, string>();
+
+    if (args?.courseId) {
+      contextCodes.push(`course_${args.courseId}`);
+      try {
+        const courseResponse = await this.axiosInstance.get(`/api/v1/courses/${args.courseId}`);
+        courseMap.set(parseInt(args.courseId, 10), courseResponse.data.name);
+      } catch (courseError: any) {
+        console.warn(`Could not fetch course name for course ${args.courseId}: ${courseError.message}`);
+      }
+    } else {
+      try {
+        const coursesResponse = await this.axiosInstance.get('/api/v1/courses', {
+          params: { enrollment_state: 'active', state: ['available'], per_page: 100 }
+        });
+        coursesResponse.data.forEach((course: any) => {
+          contextCodes.push(`course_${course.id}`);
+          courseMap.set(course.id, course.name);
+        });
+      } catch (courseError: any) {
+        console.error(`Failed to fetch active courses for announcements: ${courseError.message}`);
+        return { content: [{ type: "text", text: `Could not list active courses to fetch announcements: ${courseError.message}` }] };
+      }
+    }
+
+    if (contextCodes.length === 0) {
+      return { content: [{ type: "text", text: `No active courses found${args?.courseId ? ` matching ID ${args.courseId}` : ''} to fetch announcements from.` }] };
+    }
+
+    params.context_codes = contextCodes;
+
     try {
-      // First get all active courses
-      const coursesResponse = await this.axiosInstance.get('/api/v1/courses', {
-        params: {
-          enrollment_state: 'active',
-          per_page: 100
-        }
-      });
-      
-      const courses = coursesResponse.data;
-      const courseIds = courses.map((course: any) => course.id);
-      
-      // Build context codes for the announcements API
-      const contextCodes = courseIds.map((id: string) => `course_${id}`);
-      
-      // Get announcements for all courses at once
-      const announcementsResponse = await this.axiosInstance.get('/api/v1/announcements', {
-        params: {
-          context_codes: contextCodes,
-          start_date: new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString(),
-          per_page: 50
-        }
-      });
-      
-      const announcements = announcementsResponse.data;
-      
-      // Add course names to the announcements
-      const coursesMap = new Map(courses.map((course: any) => [course.id, course.name]));
-      const formattedAnnouncements: Announcement[] = announcements.map((announcement: any) => {
-        const courseId = announcement.context_code.replace('course_', '');
-        return {
-          id: announcement.id,
-          title: announcement.title,
-          message: announcement.message,
-          posted_at: announcement.posted_at,
-          course_id: courseId,
-          course_name: coursesMap.get(courseId) || 'Unknown Course',
-          html_url: announcement.html_url
-        };
-      });
-      
-      // Sort by posted date (newest first)
-      formattedAnnouncements.sort((a, b) => 
-        new Date(b.posted_at).getTime() - new Date(a.posted_at).getTime()
-      );
+      const announcements: Announcement[] = await this.fetchAllPages<Announcement>('/api/v1/announcements', { params });
+
+      if (announcements.length === 0) {
+        return { content: [{ type: "text", text: `No announcements found in the last ${days} days${args?.courseId ? ` for course ${args.courseId}` : ''}.` }] };
+      }
+
+      const formattedAnnouncements = announcements
+        .map((ann: Announcement) => {
+          const courseIdNum = parseInt(ann.context_code.split('_')[1], 10);
+          const courseName = courseMap.get(courseIdNum) || `Course ID ${courseIdNum}`;
+          const postedDate = ann.posted_at ? new Date(ann.posted_at).toLocaleString() : 'Unknown date';
+          const messageText = ann.message?.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim() || 'No message content.';
+          return `Course: ${courseName} (ID: ${courseIdNum})\nTitle: ${ann.title}\nPosted: ${postedDate}\nMessage: ${messageText}\n---`;
+        })
+        .join('\n');
 
       return {
         content: [
           {
             type: "text",
-            text: formattedAnnouncements.length > 0 
-              ? `Recent Announcements (Last ${days} days):\n\n${formattedAnnouncements.map(announcement => 
-                `Title: ${announcement.title}\nCourse: ${announcement.course_name}\nPosted: ${new Date(announcement.posted_at).toLocaleString()}\n\n${announcement.message.replace(/<[^>]*>/g, '')}\n\nURL: ${announcement.html_url}\n---`
-              ).join('\n')}`
-              : `No announcements found in the last ${days} days.`,
+            text: `Recent Announcements (last ${days} days):\n\n${formattedAnnouncements}`,
           },
         ],
       };
-    } catch (error) {
-      if (error instanceof Error) {
-        throw new Error(`Failed to fetch recent announcements: ${error.message}`);
-      }
-      throw new Error('Failed to fetch recent announcements: Unknown error');
+    } catch (error: any) {
+      console.error(`Error fetching announcements: ${error.message}`, error.response?.data);
+      const apiError = error.response?.data?.errors?.[0]?.message || error.message;
+      throw new Error(`Failed to fetch announcements: ${apiError}`);
     }
   }
 
   /**
-   * List modules and items for a course, with student completion status
+   * Searches files within a specific course.
    */
-  async listCourseModules(args: { courseId: string }) {
-    const { courseId } = args;
-    
-    try {
-      const response = await this.axiosInstance.get(
-        `/api/v1/courses/${courseId}/modules`, {
-          params: {
-            include: ['items', 'content_details'],
-            student_id: 'self',
-            per_page: 100
-          }
-        }
-      );
-      
-      const modules: Module[] = response.data;
-      
-      // Format the response for better readability
-      const formattedModules = modules.map(module => ({
-        id: module.id,
-        name: module.name,
-        position: module.position,
-        state: module.state,
-        completed: module.state === 'completed',
-        items: module.items?.map(item => ({
-          id: item.id,
-          title: item.title,
-          type: item.type,
-          url: item.html_url,
-          position: item.position,
-          completed: item.completion_requirement?.completed || false,
-          requirement_type: item.completion_requirement?.type || 'none'
-        })) || []
-      }));
-      
-      // Sort modules by position
-      formattedModules.sort((a, b) => a.position - b.position);
-      
-      // Sort items within each module by position
-      formattedModules.forEach(module => {
-        module.items.sort((a, b) => a.position - b.position);
-      });
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: formattedModules.length > 0 
-              ? `Course Modules:\n\n${formattedModules.map(module => 
-                `Module: ${module.name}${module.completed ? ' (Completed)' : ''}\n${module.items.length > 0 ? 
-                  `Items:\n${module.items.map(item => 
-                    `  - ${item.title} (${item.type})${item.completed ? ' ✓' : ''}${item.requirement_type !== 'none' ? ` [${item.requirement_type}]` : ''}`
-                  ).join('\n')}` 
-                  : 'No items'}\n---`
-              ).join('\n')}`
-              : "No modules found for this course.",
-          },
-        ],
-      };
-    } catch (error) {
-      if (error instanceof Error) {
-        throw new Error(`Failed to fetch course modules: ${error.message}`);
-      }
-      throw new Error('Failed to fetch course modules: Unknown error');
-    }
-  }
-
-  /**
-   * Search files within a course
-   */
-  async findCourseFiles(args: { courseId: string; searchTerm: string }) {
+  async findCourseFiles(args: { courseId: string; searchTerm: string }): Promise<{ content: { type: string; text: string }[] }> {
     const { courseId, searchTerm } = args;
-    
+    console.log(`Searching files in course ${courseId} for term: ${searchTerm}`);
+
     try {
-      const response = await this.axiosInstance.get(
-        `/api/v1/courses/${courseId}/files`, {
-          params: {
-            search_term: searchTerm,
-            per_page: 50
-          }
-        }
-      );
-      
-      const files: CourseFile[] = response.data;
-      
-      // Format the response for better readability
-      const formattedFiles = files.map(file => ({
-        id: file.id,
-        name: file.display_name,
-        size: this.formatFileSize(file.size),
-        type: file.content_type,
-        created: new Date(file.created_at).toLocaleString(),
-        updated: new Date(file.updated_at).toLocaleString(),
-        url: file.url
-      }));
+      const files: CourseFile[] = await this.fetchAllPages<CourseFile>(`/api/v1/courses/${courseId}/files`, {
+        params: {
+          search_term: searchTerm,
+          per_page: 50,
+          sort: 'name',
+          order: 'asc',
+        },
+      });
+
+      if (files.length === 0) {
+        return { content: [{ type: "text", text: `No files found matching "${searchTerm}" in course ${courseId}.` }] };
+      }
+
+      const formattedFiles = files
+        .map((file: CourseFile) => {
+          return `File: ${file.display_name}\nID: ${file.id}\nSize: ${this.formatFileSize(file.size)}\nCreated: ${new Date(file.created_at).toLocaleDateString()}\nModified: ${new Date(file.updated_at).toLocaleDateString()}\nType: ${file.content_type}\nURL: ${file.url}\n---`;
+        })
+        .join('\n');
 
       return {
         content: [
           {
             type: "text",
-            text: formattedFiles.length > 0 
-              ? `Files matching "${searchTerm}":\n\n${formattedFiles.map(file => 
-                `Name: ${file.name}\nType: ${file.type}\nSize: ${file.size}\nCreated: ${file.created}\nUpdated: ${file.updated}\nURL: ${file.url}\n---`
-              ).join('\n')}`
-              : `No files found matching "${searchTerm}" in this course.`,
+            text: `Files matching "${searchTerm}" in course ${courseId}:\n\n${formattedFiles}`,
           },
         ],
       };
-    } catch (error) {
-      if (error instanceof Error) {
-        throw new Error(`Failed to search course files: ${error.message}`);
-      }
-      throw new Error('Failed to search course files: Unknown error');
+    } catch (error: any) {
+      console.error(`Error searching files in course ${courseId}: ${error.message}`, error.response?.data);
+      const apiError = error.response?.data?.errors?.[0]?.message || error.message;
+      throw new Error(`Failed to search files: ${apiError}`);
     }
   }
 
   /**
-   * List unread discussion topics for a course
+   * Lists published pages within a specific course.
    */
-  async getUnreadDiscussions(args: { courseId: string }) {
+  async listCoursePages(args: { courseId: string }): Promise<Page[]> { // Return the raw Page array
     const { courseId } = args;
-    
+    console.log(`Listing pages in course ${courseId}`);
+
     try {
-      const response = await this.axiosInstance.get(
-        `/api/v1/courses/${courseId}/discussion_topics`, {
-          params: {
-            filter_by: 'unread',
-            per_page: 50
+      // Fetch only published pages, sort by title
+      const pages: Page[] = await this.fetchAllPages<Page>(`/api/v1/courses/${courseId}/pages`, {
+        params: {
+          published: true,
+          per_page: 50,
+          sort: 'title',
+          order: 'asc',
+        },
+      });
+      return pages; // Return the data directly
+    } catch (error: any) {
+      console.error(`Error listing pages in course ${courseId}: ${error.message}`, error.response?.data);
+      const apiError = error.response?.data?.errors?.[0]?.message || error.message;
+      // Re-throw the error so the caller (findOfficeHoursInfo) can handle it
+      throw new Error(`Failed to list course pages: ${apiError}`);
+    }
+  }
+
+  /**
+   * Fetches the full content of a specific course page.
+   */
+  async getPageContent(args: { courseId: string; pageUrl: string }): Promise<Page | null> {
+    const { courseId, pageUrl } = args;
+    console.log(`Fetching content for page ${pageUrl} in course ${courseId}`);
+    try {
+      // The pageUrl is the identifier used in the API endpoint
+      const response = await this.axiosInstance.get<Page>(`/api/v1/courses/${courseId}/pages/${pageUrl}`);
+      return response.data; // Returns the page object including the 'body'
+    } catch (error: any) {
+      // Handle 404 Not Found gracefully
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        console.warn(`Page ${pageUrl} not found in course ${courseId}.`);
+        return null;
+      }
+      console.error(`Error fetching page content for ${pageUrl} in course ${courseId}: ${error.message}`, error.response?.data);
+      const apiError = error.response?.data?.errors?.[0]?.message || error.message;
+      // Re-throw other errors
+      throw new Error(`Failed to fetch page content: ${apiError}`);
+    }
+  }
+
+  /**
+   * Searches common locations within a course for instructor office hours information.
+   * Searches likely file names, recent announcements, and course pages.
+   */
+  async findOfficeHoursInfo(args: { courseId: string }): Promise<{ content: { type: string; text: string }[] }> {
+    const { courseId } = args;
+    // Keywords to search *within* page/announcement content - Added 'syllabus'
+    const contentKeywords = ["office", "hours", "contact", "schedule", "zoom", "meet", "appointment", "syllabus"];
+    // File names to search *for*
+    const fileNameKeywords = ["syllabus", "schedule", "contact", "info", "details", "welcome", "overview"];
+    let findings: string[] = [];
+    let errors: string[] = [];
+    let syllabusPages: { title: string; url: string }[] = []; // Store pages specifically mentioning syllabus
+
+    // 1. Search Files (by likely names)
+    try {
+      console.log(`Searching files in course ${courseId} for names like: ${fileNameKeywords.join(', ')}`);
+      let foundFiles: { display_name: string; url: string }[] = [];
+
+      for (const term of fileNameKeywords) {
+        try {
+          // findCourseFiles searches *file names* using the API
+          const fileResults = await this.findCourseFiles({ courseId, searchTerm: term });
+
+          if (fileResults.content && fileResults.content[0]?.text && !fileResults.content[0].text.startsWith("No files found")) {
+            const fileText = fileResults.content[0].text;
+            const fileEntries = fileText.split('---\n');
+            fileEntries.forEach((entry: string) => {
+              if (entry.trim()) {
+                const nameMatch = entry.match(/File: (.*)/);
+                const urlMatch = entry.match(/URL: (.*)/);
+                if (nameMatch && urlMatch && !foundFiles.some(f => f.display_name === nameMatch[1].trim())) {
+                  foundFiles.push({ display_name: nameMatch[1].trim(), url: urlMatch[1].trim() });
+                }
+              }
+            });
+          }
+        } catch (fileError: any) {
+          console.warn(`Minor error searching files for name "${term}": ${fileError.message}`);
+          errors.push(`Minor error searching files for name '${term}': ${fileError.message}`);
+        }
+        await delay(150); // Small delay between file searches
+      }
+
+      if (foundFiles.length > 0) {
+        findings.push(`Found potential files (check these for syllabus, schedule, or contact info):\n${foundFiles.map(f => `- ${f.display_name} (${f.url})`).join('\n')}`);
+      } else {
+        if (!errors.some(e => !e.startsWith('Minor error'))) {
+          findings.push("No files found with names like 'syllabus', 'schedule', 'contact', etc.");
+        }
+      }
+    } catch (error: any) {
+      console.error(`Error during file search process: ${error.message}`);
+      errors.push(`Failed during file search: ${error.message}`);
+    }
+
+    // 2. Search Recent Announcements (for keywords in content)
+    try {
+      console.log(`Searching recent announcements in course ${courseId} for keywords: ${contentKeywords.join(', ')}`);
+      const announcementResult = await this.getRecentAnnouncements({ days: 30, courseId: courseId });
+      let relevantAnnouncements: string[] = [];
+
+      if (announcementResult.content && announcementResult.content[0]?.text && !announcementResult.content[0].text.startsWith("No announcements found")) {
+        const announcementText = announcementResult.content[0].text;
+        const announcementEntries = announcementText.split('---\n');
+        announcementEntries.forEach((entry: string) => {
+          if (entry.trim()) {
+            const titleMatch = entry.match(/Title: (.*)/);
+            const messageMatch = entry.match(/Message: ([\s\S]*)/);
+            if (titleMatch && messageMatch) {
+              const title = titleMatch[1].trim();
+              const message = messageMatch[1].trim().toLowerCase(); // Search case-insensitive
+              const postedDateMatch = entry.match(/Posted: (.*)/);
+              const postedDate = postedDateMatch ? postedDateMatch[1].trim() : 'unknown date';
+
+              // Check if title or message contains office hour keywords
+              if (contentKeywords.some(term => title.toLowerCase().includes(term) || message.includes(term))) {
+                relevantAnnouncements.push(`- Announcement: "${title}" (posted ${postedDate}) - Check message for details.`);
+              }
+            }
+          }
+        });
+      }
+
+      if (relevantAnnouncements.length > 0) {
+        findings.push(`Found potentially relevant announcements:\n${relevantAnnouncements.join('\n')}`);
+      } else {
+        if (!errors.some(e => e.includes('announcements'))) {
+          findings.push("No recent announcements found containing office hour or syllabus keywords."); // Updated message
+        }
+      }
+    } catch (error: any) {
+      console.error(`Error searching announcements: ${error.message}`);
+      errors.push(`Failed to search announcements: ${error.message}`);
+    }
+
+    // 3. Search Course Pages (for keywords in content, highlighting syllabus)
+    try {
+      console.log(`Searching course pages in course ${courseId} for keywords: ${contentKeywords.join(', ')}`);
+      const pages = await this.listCoursePages({ courseId });
+      let relevantPages: { title: string; url: string }[] = []; // General relevant pages
+      syllabusPages = []; // Reset syllabusPages for this run
+
+      if (pages.length > 0) {
+        for (const page of pages) {
+          try {
+            const pageWithContent = await this.getPageContent({ courseId, pageUrl: page.url });
+            if (pageWithContent?.body) {
+              const pageTitle = pageWithContent.title.toLowerCase();
+              const pageBody = pageWithContent.body.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').toLowerCase();
+              let isSyllabusRelated = false;
+              let isGenerallyRelevant = false;
+
+              // Check specifically for "syllabus"
+              if (pageTitle.includes("syllabus") || pageBody.includes("syllabus")) {
+                isSyllabusRelated = true;
+                if (!syllabusPages.some(p => p.url === pageWithContent.html_url)) {
+                  syllabusPages.push({ title: pageWithContent.title, url: pageWithContent.html_url });
+                }
+              }
+
+              // Check for other content keywords (office hours, contact, etc.)
+              if (contentKeywords.some(term => term !== "syllabus" && (pageTitle.includes(term) || pageBody.includes(term)))) {
+                isGenerallyRelevant = true;
+                // Avoid adding duplicates if already added as syllabus-related
+                if (!isSyllabusRelated && !relevantPages.some(p => p.url === pageWithContent.html_url)) {
+                  relevantPages.push({ title: pageWithContent.title, url: pageWithContent.html_url });
+                }
+              }
+            }
+          } catch (pageContentError: any) {
+            console.warn(`Could not fetch or search content for page "${page.title}": ${pageContentError.message}`);
+          }
+          await delay(150);
+        }
+      }
+
+      // Add findings for syllabus pages first
+      if (syllabusPages.length > 0) {
+        findings.push(`Found pages related to the syllabus (check these first for office hours):\n${syllabusPages.map(p => `- Page: "${p.title}" (${p.url})`).join('\n')}`);
+      }
+
+      // Add findings for other relevant pages
+      if (relevantPages.length > 0) {
+        findings.push(`Found other potentially relevant pages:\n${relevantPages.map(p => `- Page: "${p.title}" (${p.url})`).join('\n')}`);
+      }
+
+      // Report if no relevant pages found
+      if (syllabusPages.length === 0 && relevantPages.length === 0) {
+        if (!errors.some(e => e.includes('pages'))) {
+          findings.push("No published pages found containing syllabus, office hour, or contact keywords."); // Updated message
+        }
+      }
+    } catch (error: any) {
+      console.error(`Error searching course pages: ${error.message}`);
+      errors.push(`Failed to search course pages: ${error.message}`);
+    }
+
+    // 4. Combine results
+    let combinedResult = `Search results for office hours in course ${courseId}:\n\n`;
+    const validFindings = findings.filter(f => !f.startsWith("No "));
+    if (validFindings.length > 0) {
+      // Prioritize syllabus pages in the output order if they exist
+      const syllabusFinding = validFindings.find(f => f.includes("syllabus") && f.includes("Page:"));
+      const otherFindings = validFindings.filter(f => !(f.includes("syllabus") && f.includes("Page:")));
+
+      if (syllabusFinding) {
+        combinedResult += syllabusFinding + '\n\n'; // Add syllabus pages first
+      }
+      combinedResult += otherFindings.join('\n\n'); // Add the rest
+    } else {
+      combinedResult += "Could not find specific information about office hours in likely file names, recent announcements, or course pages.";
+    }
+
+    combinedResult += "\n\n---";
+
+    combinedResult += "\n\n*Please Note:* This tool searched for files named 'syllabus', 'schedule', etc., and searched the *content* of recent announcements and course pages (including for the word 'syllabus'). It **cannot** search the content *inside* files (like PDFs or Word documents). Check the items listed above for details.";
+
+    if (errors.length > 0) {
+      const significantErrors = errors.filter(e => !e.startsWith('Minor error'));
+      if (significantErrors.length > 0 || validFindings.length === 0) {
+        combinedResult += `\n\nErrors encountered during search:\n- ${errors.join('\n- ')}`;
+      }
+    }
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: combinedResult.trim(), // Trim potential trailing newlines
+        },
+      ],
+    };
+  }
+
+  /**
+   * Helper method to fetch all pages for a paginated Canvas API endpoint.
+   * Assumes the API uses Link headers for pagination.
+   * Added generic type T for the expected data items.
+   */
+  private async fetchAllPages<T>(initialUrl: string, config?: any): Promise<T[]> {
+    let results: T[] = [];
+    let url: string | null = initialUrl;
+    const requestConfig = { ...config };
+
+    console.log(`Fetching all pages starting from: ${url}`);
+
+    while (url) {
+      try {
+        const response: AxiosResponse<T[]> = await this.axiosInstance.get<T[]>(url, requestConfig);
+        const responseData = Array.isArray(response.data) ? response.data : [response.data];
+        results = results.concat(responseData);
+
+        const linkHeader: string | undefined = response.headers['link'];
+        url = null;
+        if (linkHeader) {
+          const links: string[] = linkHeader.split(',');
+          const nextLink: string | undefined = links.find((link: string) => link.includes('rel="next"'));
+          if (nextLink) {
+            const match: RegExpMatchArray | null = nextLink.match(/<(.*?)>/);
+            if (match && match[1]) {
+              url = match[1];
+              console.log(`Found next page link: ${url}`);
+              if (url) await delay(100);
+            }
           }
         }
-      );
-      
-      const discussions: DiscussionTopic[] = response.data;
-      
-      // Format the response for better readability
-      const formattedDiscussions = discussions.map(discussion => ({
-        id: discussion.id,
-        title: discussion.title,
-        message: discussion.message?.replace(/<[^>]*>/g, '') || 'No message',
-        author: discussion.author_name || 'Unknown',
-        posted_at: discussion.posted_at ? new Date(discussion.posted_at).toLocaleString() : 'Unknown',
-        unread_count: discussion.unread_count || 0,
-        url: discussion.html_url
-      }));
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: formattedDiscussions.length > 0 
-              ? `Unread Discussions:\n\n${formattedDiscussions.map(discussion => 
-                `Title: ${discussion.title}\nAuthor: ${discussion.author}\nPosted: ${discussion.posted_at}\nUnread Replies: ${discussion.unread_count}\n\n${discussion.message.length > 200 ? `${discussion.message.substring(0, 200)}...` : discussion.message}\n\nURL: ${discussion.url}\n---`
-              ).join('\n')}`
-              : "No unread discussions found for this course.",
-          },
-        ],
-      };
-    } catch (error) {
-      if (error instanceof Error) {
-        throw new Error(`Failed to fetch unread discussions: ${error.message}`);
+      } catch (error: any) {
+        console.error(`Error fetching page ${url}: ${error.message}`, error.response?.data);
+        const apiError = error.response?.data?.errors?.[0]?.message || error.message;
+        throw new Error(`Failed during pagination at ${url}: ${apiError}`);
       }
-      throw new Error('Failed to fetch unread discussions: Unknown error');
     }
-  }
 
-  /**
-   * Retrieve posts/replies for a discussion topic
-   */
-  async viewDiscussionTopic(args: { courseId: string; topicId: string }) {
-    const { courseId, topicId } = args;
-    
-    try {
-      const response = await this.axiosInstance.get(
-        `/api/v1/courses/${courseId}/discussion_topics/${topicId}/view`
-      );
-      
-      const data = response.data;
-      const topic = data.topic as DiscussionTopic;
-      const entries = data.view as DiscussionEntry[];
-      
-      // Format the topic and entries for better readability
-      const formattedTopic = {
-        id: topic.id,
-        title: topic.title,
-        message: topic.message?.replace(/<[^>]*>/g, '') || 'No message',
-        author: topic.author_name || 'Unknown',
-        posted_at: topic.posted_at ? new Date(topic.posted_at).toLocaleString() : 'Unknown',
-        url: topic.html_url
-      };
-      
-      const formatEntry = (entry: DiscussionEntry, depth = 0): string => {
-        const indent = '  '.repeat(depth);
-        let result = `${indent}From: ${entry.user_name}\n${indent}Posted: ${new Date(entry.created_at).toLocaleString()}\n${indent}Message: ${entry.message.replace(/<[^>]*>/g, '')}\n`;
-        
-        if (entry.replies && entry.replies.length > 0) {
-          result += `${indent}Replies:\n`;
-          entry.replies.forEach(reply => {
-            result += `\n${formatEntry(reply, depth + 1)}`;
-          });
-        }
-        
-        return result;
-      };
-      
-      const formattedEntries = entries.map(entry => formatEntry(entry));
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Discussion Topic: ${formattedTopic.title}\nAuthor: ${formattedTopic.author}\nPosted: ${formattedTopic.posted_at}\n\n${formattedTopic.message}\n\nReplies:\n\n${formattedEntries.length > 0 ? formattedEntries.join('\n---\n') : 'No replies yet.'}`,
-          },
-        ],
-      };
-    } catch (error) {
-      if (error instanceof Error) {
-        throw new Error(`Failed to fetch discussion topic: ${error.message}`);
-      }
-      throw new Error('Failed to fetch discussion topic: Unknown error');
-    }
-  }
-
-  /**
-   * Retrieve student's submission details for a quiz
-   */
-  async getMyQuizSubmission(args: { courseId: string; quizId: string }) {
-    const { courseId, quizId } = args;
-    
-    try {
-      // Get quiz information
-      const quizResponse = await this.axiosInstance.get(
-        `/api/v1/courses/${courseId}/quizzes/${quizId}`
-      );
-      
-      const quiz = quizResponse.data;
-      
-      // Get quiz submissions
-      const submissionsResponse = await this.axiosInstance.get(
-        `/api/v1/courses/${courseId}/quizzes/${quizId}/submissions`
-      );
-      
-      const submissions = submissionsResponse.data.quiz_submissions;
-      
-      // Filter for the current user's submission
-      // In a self-service context, there should typically be only one submission
-      const mySubmission = submissions.length > 0 ? submissions[0] : null;
-      
-      if (!mySubmission) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `No submission found for quiz "${quiz.title}".`,
-            },
-          ],
-        };
-      }
-      
-      // Format the submission details
-      const formattedSubmission = {
-        quiz_title: quiz.title,
-        quiz_points_possible: quiz.points_possible,
-        attempt: mySubmission.attempt,
-        score: mySubmission.score,
-        score_percent: quiz.points_possible ? (mySubmission.score / quiz.points_possible) * 100 : null,
-        started_at: mySubmission.started_at ? new Date(mySubmission.started_at).toLocaleString() : 'Unknown',
-        finished_at: mySubmission.finished_at ? new Date(mySubmission.finished_at).toLocaleString() : 'Not completed',
-        time_spent: this.formatTimeDuration(mySubmission.time_spent),
-        status: mySubmission.workflow_state,
-        url: mySubmission.html_url
-      };
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Quiz Submission:\n\nQuiz: ${formattedSubmission.quiz_title}\nAttempt: ${formattedSubmission.attempt}\nScore: ${formattedSubmission.score !== null ? formattedSubmission.score : 'Not graded'} / ${formattedSubmission.quiz_points_possible}${formattedSubmission.score_percent !== null ? ` (${formattedSubmission.score_percent.toFixed(2)}%)` : ''}\nStarted: ${formattedSubmission.started_at}\nFinished: ${formattedSubmission.finished_at}\nTime Spent: ${formattedSubmission.time_spent}\nStatus: ${formattedSubmission.status}\nURL: ${formattedSubmission.url}`,
-          },
-        ],
-      };
-    } catch (error) {
-      if (error instanceof Error) {
-        throw new Error(`Failed to fetch quiz submission: ${error.message}`);
-      }
-      throw new Error('Failed to fetch quiz submission: Unknown error');
-    }
+    console.log(`Finished fetching all pages. Total items: ${results.length}`);
+    return results;
   }
 
   // Helper method to format file size
   private formatFileSize(bytes: number): string {
     if (bytes === 0) return '0 Bytes';
-    
+
     const k = 1024;
     const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
-    
+
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
-  
+
   // Helper method to format time duration in seconds
   private formatTimeDuration(seconds: number): string {
     if (!seconds) return 'Unknown';
-    
+
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     const remainingSeconds = seconds % 60;
-    
+
     let result = '';
     if (hours > 0) result += `${hours} hour${hours > 1 ? 's' : ''} `;
     if (minutes > 0) result += `${minutes} minute${minutes > 1 ? 's' : ''} `;
-    if (remainingSeconds > 0 || result === '') 
+    if (remainingSeconds > 0 || result === '')
       result += `${remainingSeconds} second${remainingSeconds !== 1 ? 's' : ''}`;
-    
+
     return result.trim();
   }
-} 
+}

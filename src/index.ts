@@ -275,6 +275,20 @@ class CanvasServer {
               required: ["courseId", "quizId"],
             },
           },
+          {
+            name: "find-office-hours-info",
+            description: "Search common locations within a course for instructor office hours information (e.g., syllabus, announcements).",
+            inputSchema: {
+              type: "object",
+              properties: {
+                courseId: {
+                  type: "string",
+                  description: "The ID of the course to search within."
+                }
+              },
+              required: ["courseId"],
+            },
+          },
         ],
       };
       console.error("Sending ListToolsResponse:", JSON.stringify(toolsResponse).substring(0, 200) + '...');
@@ -292,14 +306,26 @@ class CanvasServer {
             return await this.handleListCourses();
 
           case "list-rubrics":
-            return await this.handleListRubrics(args);
+            if (!args || typeof args.courseId !== 'string') {
+              throw new Error("Missing or invalid 'courseId' argument for list-rubrics");
+            }
+            return await this.handleListRubrics(args as { courseId: string });
 
           case "list-assignments":
-            return await this.handleListAssignments(args);
+             if (!args || typeof args.courseId !== 'string') {
+               throw new Error("Missing or invalid 'courseId' argument for list-assignments");
+             }
+             // Pass the whole args object
+             return await this.handleListAssignments(args as { courseId: string; studentId?: string; includeSubmissionHistory?: boolean });
 
           case "list-sections":
-            return await this.handleListSections(args);
+            if (!args || typeof args.courseId !== 'string') {
+              throw new Error("Missing or invalid 'courseId' argument for list-sections");
+            }
+            // Pass the whole args object
+            return await this.handleListSections(args as { courseId: string; includeStudentCount?: boolean });
 
+          // Student-specific tools delegated to StudentTools class
           case "get-my-todo-items":
             return await this.studentTools.getMyTodoItems();
 
@@ -319,37 +345,50 @@ class CanvasServer {
             return await this.studentTools.getAssignmentDetails(args as { courseId: string; assignmentId: string });
 
           case "get-recent-announcements":
-            return await this.studentTools.getRecentAnnouncements(args as { days?: number });
+            // Args are optional here (days, courseId)
+            return await this.studentTools.getRecentAnnouncements(args as { days?: number, courseId?: string });
 
-          case "list-course-modules":
-            if (!args || typeof args.courseId !== 'string') {
-              throw new Error("Missing or invalid 'courseId' argument for list-course-modules");
-            }
-            return await this.studentTools.listCourseModules(args as { courseId: string });
+          // case "list-course-modules": // Method not yet implemented in StudentTools
+          //   if (!args || typeof args.courseId !== 'string') {
+          //     throw new Error("Missing or invalid 'courseId' argument for list-course-modules");
+          //   }
+          //   // return await this.studentTools.listCourseModules(args as { courseId: string });
+          //   throw new Error("Tool 'list-course-modules' is not yet implemented.");
 
-          case "find-course-files":
+          case "find-course-files": // Now implemented
             if (!args || typeof args.courseId !== 'string' || typeof args.searchTerm !== 'string') {
               throw new Error("Missing or invalid 'courseId' or 'searchTerm' arguments for find-course-files");
             }
             return await this.studentTools.findCourseFiles(args as { courseId: string; searchTerm: string });
 
-          case "get-unread-discussions":
+          // case "get-unread-discussions": // Method not yet implemented in StudentTools
+          //   if (!args || typeof args.courseId !== 'string') {
+          //     throw new Error("Missing or invalid 'courseId' argument for get-unread-discussions");
+          //   }
+          //   // return await this.studentTools.getUnreadDiscussions(args as { courseId: string });
+          //    throw new Error("Tool 'get-unread-discussions' is not yet implemented.");
+
+          // case "view-discussion-topic": // Method not yet implemented in StudentTools
+          //   if (!args || typeof args.courseId !== 'string' || typeof args.topicId !== 'string') {
+          //     throw new Error("Missing or invalid 'courseId' or 'topicId' arguments for view-discussion-topic");
+          //   }
+          //   // return await this.studentTools.viewDiscussionTopic(args as { courseId: string; topicId: string });
+          //    throw new Error("Tool 'view-discussion-topic' is not yet implemented.");
+
+          // case "get-my-quiz-submission": // Method not yet implemented in StudentTools
+          //   if (!args || typeof args.courseId !== 'string' || typeof args.quizId !== 'string') {
+          //     throw new Error("Missing or invalid 'courseId' or 'quizId' arguments for get-my-quiz-submission");
+          //   }
+          //   // return await this.studentTools.getMyQuizSubmission(args as { courseId: string; quizId: string });
+          //    throw new Error("Tool 'get-my-quiz-submission' is not yet implemented.");
+
+          // Add the case for the new tool
+          case "find-office-hours-info":
             if (!args || typeof args.courseId !== 'string') {
-              throw new Error("Missing or invalid 'courseId' argument for get-unread-discussions");
+              throw new Error("Missing or invalid 'courseId' argument for find-office-hours-info");
             }
-            return await this.studentTools.getUnreadDiscussions(args as { courseId: string });
-
-          case "view-discussion-topic":
-            if (!args || typeof args.courseId !== 'string' || typeof args.topicId !== 'string') {
-              throw new Error("Missing or invalid 'courseId' or 'topicId' arguments for view-discussion-topic");
-            }
-            return await this.studentTools.viewDiscussionTopic(args as { courseId: string; topicId: string });
-
-          case "get-my-quiz-submission":
-            if (!args || typeof args.courseId !== 'string' || typeof args.quizId !== 'string') {
-              throw new Error("Missing or invalid 'courseId' or 'quizId' arguments for get-my-quiz-submission");
-            }
-            return await this.studentTools.getMyQuizSubmission(args as { courseId: string; quizId: string });
+            // Call the new handler method instead of directly calling studentTools
+            return await this.handleFindOfficeHours(args as { courseId: string });
 
           default:
             throw new Error(`Unknown tool: ${name}`);
@@ -945,6 +984,24 @@ Please present this information in a clear, concise format that helps me quickly
         throw new Error(`Failed to fetch sections: ${error.message}`);
       }
       throw new Error('Failed to fetch sections: Unknown error');
+    }
+  }
+
+  // New handler method for finding office hours
+  private async handleFindOfficeHours(args: { courseId: string }) {
+    try {
+      console.error(`Executing find-office-hours-info for course ${args.courseId}`);
+      const results = await this.studentTools.findOfficeHoursInfo(args);
+      console.error(`find-office-hours-info result: ${JSON.stringify(results).substring(0, 200)}...`);
+      return results;
+    } catch (error: any) {
+      console.error(`Error in handleFindOfficeHours: ${error.message}`);
+      return {
+        error: {
+          code: -32001,
+          message: `Tool execution failed for find-office-hours-info: ${error.message}`
+        }
+      };
     }
   }
 
