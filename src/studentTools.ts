@@ -26,30 +26,28 @@ export class StudentTools {
       const response = await this.axiosInstance.get('/api/v1/users/self/todo');
       const todoItems: TodoItem[] = response.data;
 
-      // Format the response for better readability in LLM context
-      const formattedResult = todoItems.map(item => {
+      // Format the response for better readability and conciseness
+      const formattedItemsText = todoItems.map(item => {
         let title = item.title || (item.assignment ? item.assignment.name : 'Untitled Item');
-        let dueDate = item.assignment?.due_at ? new Date(item.assignment.due_at).toLocaleString() : 'No due date';
+        // Use a shorter date format
+        let dueDate = item.assignment?.due_at ? new Date(item.assignment.due_at).toLocaleDateString() : 'No due date';
+        let type = item.type || 'Unknown';
+        let course = item.context_name || 'Unknown Course';
 
-        return {
-          title,
-          type: item.type,
-          course_name: item.context_name,
-          due_date: dueDate,
-          points_possible: item.assignment?.points_possible || null,
-          url: item.html_url
-        };
-      });
+        // Concise format: "- Title (Course) - Due: DueDate [Type]"
+        return `- ${title} (${course}) - Due: ${dueDate} [${type}]`;
+
+      }).join('\n'); // Join with newline
+
+      const resultText = todoItems.length > 0
+        ? `To-Do Items (Summary):\n\n${formattedItemsText}\n\n(Use 'getAssignmentDetails' or ask for more info on a specific item if needed)`
+        : "No to-do items found.";
 
       return {
         content: [
           {
             type: "text",
-            text: todoItems.length > 0
-              ? `To-Do Items:\n\n${formattedResult.map(item =>
-                `Title: ${item.title}\nType: ${item.type}\nCourse: ${item.course_name}\nDue Date: ${item.due_date}${item.points_possible ? `\nPoints: ${item.points_possible}` : ''}\nURL: ${item.url}\n---`
-              ).join('\n')}`
-              : "No to-do items found.",
+            text: resultText,
           },
         ],
       };
@@ -109,14 +107,21 @@ export class StudentTools {
         return new Date(a.due_at).getTime() - new Date(b.due_at).getTime();
       });
 
+      // Apply concise formatting
+      const formattedAssignments = assignments.map(assignment => {
+        const dueDate = assignment.due_at ? new Date(assignment.due_at).toLocaleDateString() : 'No due date';
+        const points = assignment.points_possible !== null ? `Points: ${assignment.points_possible}` : 'No points';
+        const submitted = assignment.submission?.submitted_at ? 'Submitted: Yes' : 'Submitted: No';
+        // Concise format: "- Assignment Name (Course Name) - Due: DueDate [Points] (Submitted)"
+        return `- ${assignment.name} (${assignment.course_name}) - Due: ${dueDate} [${points}] (${submitted})`;
+      }).join('\n'); // Join with newline
+
       return {
         content: [
           {
             type: "text",
             text: assignments.length > 0
-              ? `Upcoming Assignments:\n\n${assignments.map(assignment =>
-                `Assignment: ${assignment.name}\nCourse: ${assignment.course_name}\nDue Date: ${assignment.due_at ? new Date(assignment.due_at).toLocaleString() : 'No due date'}\nPoints: ${assignment.points_possible}\n${assignment.submission ? `Submitted: ${assignment.submission.submitted_at ? 'Yes' : 'No'}\nScore: ${assignment.submission.score !== null ? assignment.submission.score : 'Not graded'}` : 'No submission information'}\nURL: ${assignment.html_url}\n---`
-              ).join('\n')}`
+              ? `Upcoming Assignments:\n\n${formattedAssignments}`
               : "No upcoming assignments found.",
           },
         ],

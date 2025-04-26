@@ -710,13 +710,15 @@ Please present this information in a clear, concise format that helps me quickly
 
         const courses: Course[] = response.data;
 
+        // Apply concise formatting
         const formattedCourses = courses
           .filter(course => course.workflow_state === 'available')
           .map((course: Course) => {
             const termInfo = course.term ? ` (${course.term.name})` : '';
-            return `Course: ${course.name}${termInfo}\nID: ${course.id}\nCode: ${course.course_code}\n---`;
+            // Concise format: "- Course Name (Term) [ID: courseId]"
+            return `- ${course.name}${termInfo} [ID: ${course.id}]`;
           })
-          .join('\n');
+          .join('\n'); // Join with newline, remove '---'
 
         // Success, return the result
         return {

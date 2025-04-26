@@ -93,53 +93,151 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.write(message["content"])
 
+# Define markers (should match llm_service.py)
+TOOL_CALL_START_MARKER = "[TOOL_CALL_START]"
+TOOL_CALL_END_MARKER = "[TOOL_CALL_END]"
+
 # Chat input
 if prompt := st.chat_input("Ask about your Canvas courses..."):
     # Add user message to chat history
     st.session_state.messages.append({"role": "user", "content": prompt})
-    
+
     # Display user message
     with st.chat_message("user"):
         st.write(prompt)
-    
+
     # Display assistant response
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
         message_placeholder.text("Thinking...")
-        
+        full_response_content = "" # Initialize empty string to accumulate content
+        current_status_message = "" # Track the latest status message
+
         try:
             # Format chat history for the API
             history = [
-                {"role": msg["role"], "content": msg["content"]} 
-                for msg in st.session_state.messages[:-1]  # Exclude the current message
+                {"role": msg["role"], "content": msg["content"]}
+                for msg in st.session_state.messages[:-1] # Exclude the current user message
             ]
-            
-            # Make request to API
+
+            # Make streaming request to API
             response = requests.post(
                 f"{API_URL}/chat",
                 json={
-                    "message": prompt, 
+                    "message": prompt,
                     "history": history,
-                    "use_deepseek": True
+                    "use_deepseek": True,
+                    "stream": True # Enable streaming
                 },
-                timeout=120
+                timeout=120,
+                stream=True # Enable streaming in requests
             )
-            
-            if response.status_code == 200:
-                result = response.json()
-                response_content = result.get("response", "Sorry, I couldn't generate a response.")
-                message_placeholder.markdown(response_content)
+
+            response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+
+            # Process the stream
+            buffer = ""
+            for chunk in response.iter_content(chunk_size=None, decode_unicode=True):
+                if not chunk:
+                    continue
                 
-                # Add assistant response to chat history
-                st.session_state.messages.append({"role": "assistant", "content": response_content})
+                buffer += chunk
+                processed_upto = 0
+
+                while True:
+                    start_marker_pos = buffer.find(TOOL_CALL_START_MARKER, processed_upto)
+                    end_marker_pos = buffer.find(TOOL_CALL_END_MARKER, processed_upto)
+
+                    # Find the earliest marker
+                    first_marker_pos = -1
+                    is_start_marker = False
+                    if start_marker_pos != -1 and (end_marker_pos == -1 or start_marker_pos < end_marker_pos):
+                        first_marker_pos = start_marker_pos
+                        is_start_marker = True
+                        marker_len = len(TOOL_CALL_START_MARKER)
+                    elif end_marker_pos != -1:
+                        first_marker_pos = end_marker_pos
+                        is_start_marker = False
+                        marker_len = len(TOOL_CALL_END_MARKER)
+                    
+                    # If no marker found in the remaining buffer
+                    if first_marker_pos == -1:
+                        # Process any remaining text in the buffer after the last processed point
+                        text_part = buffer[processed_upto:]
+                        if text_part:
+                            full_response_content += text_part
+                            # Display accumulated content + cursor, unless a status is active
+                            if not current_status_message:
+                                message_placeholder.markdown(full_response_content + "▌")
+                            else:
+                                # If status is active, update status with content preview
+                                message_placeholder.text(f"{current_status_message} ... {full_response_content[-30:]}▌")
+                        processed_upto = len(buffer) # Mark entire buffer as processed
+                        break # Exit inner loop, wait for more chunks
+
+                    # Process text before the marker
+                    text_before_marker = buffer[processed_upto:first_marker_pos]
+                    if text_before_marker:
+                        full_response_content += text_before_marker
+                        # Display accumulated content + cursor, unless a status is active
+                        if not current_status_message:
+                            message_placeholder.markdown(full_response_content + "▌")
+                        else:
+                            message_placeholder.text(f"{current_status_message} ... {full_response_content[-30:]}▌")
+
+                    # Find the end of the marker message (newline)
+                    marker_message_end = buffer.find('\n', first_marker_pos + marker_len)
+                    if marker_message_end == -1:
+                        # Marker message might be incomplete, wait for more chunks
+                        break # Exit inner loop
+
+                    # Extract and process the marker message
+                    marker_content = buffer[first_marker_pos + marker_len : marker_message_end].strip()
+                    if is_start_marker:
+                        logger.info(f"Streamlit received tool start: {marker_content}")
+                        current_status_message = f"⏳ {marker_content}"
+                        message_placeholder.text(current_status_message)
+                    else:
+                        logger.info(f"Streamlit received tool end: {marker_content}")
+                        current_status_message = f"✅ {marker_content}" # Keep status until next text
+                        message_placeholder.text(current_status_message)
+                        # Reset status message *only* if it was the end marker, 
+                        # so subsequent text chunks clear it.
+                        current_status_message = "" 
+
+                    # Update processed position
+                    processed_upto = marker_message_end + 1
+
+                # Keep only the unprocessed part of the buffer
+                buffer = buffer[processed_upto:]
+
+            # Final update after stream ends
+            # Clear any lingering status message if needed and show final content
+            message_placeholder.markdown(full_response_content)
+
+            # Add final assistant response to chat history
+            if full_response_content:
+                 st.session_state.messages.append({"role": "assistant", "content": full_response_content})
             else:
-                error_message = f"Error: {response.status_code} - {response.text}"
-                message_placeholder.error(error_message)
-                logger.error(error_message)
-        except Exception as e:
+                 # Handle cases where the stream might end without actual content (e.g., only markers)
+                 fallback_message = "Received an empty response after processing."
+                 message_placeholder.warning(fallback_message)
+                 st.session_state.messages.append({"role": "assistant", "content": fallback_message})
+
+
+        except requests.exceptions.RequestException as e:
             error_message = f"Failed to communicate with the API: {str(e)}"
             message_placeholder.error(error_message)
             logger.error(error_message)
+            # Add error to history to maintain context
+            st.session_state.messages.append({"role": "assistant", "content": f"Error: {error_message}"})
+        except Exception as e:
+            error_message = f"An unexpected error occurred: {str(e)}"
+            message_placeholder.error(error_message)
+            logger.exception("Unexpected error during Streamlit chat processing:") # Log full traceback
+            # Add error to history
+            st.session_state.messages.append({"role": "assistant", "content": f"Error: {error_message}"})
+
 
 # Tools section
 st.header("Available Tools")
