@@ -6,29 +6,27 @@ import {
   ListToolsRequestSchema,
   ListPromptsRequestSchema,
   GetPromptRequestSchema,
-  GetPromptResultSchema,
+  GetPromptResultSchema, // Corrected import: Use GetPromptResultSchema
 } from "@modelcontextprotocol/sdk/types.js";
 import axios, { AxiosInstance } from 'axios';
-import { CanvasConfig } from './types.js';
+import { CanvasConfig, Course, Rubric } from './types.js';
+import { StudentTools } from './studentTools.js';
 import { z } from 'zod';
 
-// Import tool functions directly
-import { getUpcomingAssignments, getAssignmentDetails } from './tools/assignments.js';
-import { getRecentAnnouncements } from './tools/announcements.js';
-import { getCourseGrade, findCourseFiles, listCoursePages, getPageContent, findOfficeHoursInfo } from './tools/courses.js';
-import { getMyTodoItems } from './tools/user.js';
-// Import functions from general.ts
-import { listCourses, listRubrics, listAssignments, listSections } from './tools/general.js';
-import { delay, fetchAllPages } from './utils.js';
+// Helper function for delay
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Handles integration with Canvas LMS through Model Context Protocol
 class CanvasServer {
   private server: Server;
   private config: CanvasConfig;
   private axiosInstance: AxiosInstance;
+  private studentTools: StudentTools;
 
   constructor(config: CanvasConfig) {
     this.config = config;
-
+    
+    // Initialize server
     this.server = new Server(
       {
         name: "canvas-mcp",
@@ -42,6 +40,7 @@ class CanvasServer {
       }
     );
 
+    // Initialize axios instance with base configuration
     this.axiosInstance = axios.create({
       baseURL: this.config.baseUrl,
       headers: {
@@ -49,17 +48,23 @@ class CanvasServer {
       },
     });
 
+    // Initialize student tools
+    this.studentTools = new StudentTools(this.config.baseUrl, this.config.apiToken);
+
+    // Set up request handlers
     this.setupRequestHandlers();
   }
 
+  // Configures handlers for available tools and their execution
   private setupRequestHandlers() {
+    // List available tools
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       console.error("Received ListToolsRequest");
       const toolsResponse = {
         tools: [
           {
             name: "list-courses",
-            description: "List all active and available courses for the authenticated user",
+            description: "List all courses for the authenticated user",
             inputSchema: {
               type: "object",
               properties: {},
@@ -82,43 +87,46 @@ class CanvasServer {
           },
           {
             name: "list-assignments",
-            description: "List assignments for a specific course, optionally including submission details for a student",
+            description: "Get a list of all assignments in a course with submission status for students",
             inputSchema: {
               type: "object",
               properties: {
                 courseId: {
                   type: "string",
-                  description: "The ID of the course",
+                  description: "The ID of the course"
                 },
                 studentId: {
                   type: "string",
-                  description: "Optional: The ID of the student to get submission details for",
+                  description: "Optional: Get submission status for a specific student",
+                  required: false
                 },
                 includeSubmissionHistory: {
                   type: "boolean",
-                  description: "Optional: Include detailed submission history (default: false)",
-                },
+                  description: "Whether to include submission history details",
+                  default: false
+                }
               },
-              required: ["courseId"],
-            },
+              required: ["courseId"]
+            }
           },
           {
             name: "list-sections",
-            description: "List sections within a specific course, optionally including student count",
+            description: "Get a list of all sections in a course",
             inputSchema: {
               type: "object",
               properties: {
                 courseId: {
                   type: "string",
-                  description: "The ID of the course",
+                  description: "The ID of the course"
                 },
                 includeStudentCount: {
                   type: "boolean",
-                  description: "Optional: Include the total number of students in each section (default: false)",
-                },
+                  description: "Whether to include the number of students in each section",
+                  default: false
+                }
               },
-              required: ["courseId"],
-            },
+              required: ["courseId"]
+            }
           },
           {
             name: "get-my-todo-items",
@@ -146,8 +154,8 @@ class CanvasServer {
               properties: {
                 courseId: {
                   type: "string",
-                  description: "The ID of the course",
-                },
+                  description: "The ID of the course"
+                }
               },
               required: ["courseId"],
             },
@@ -160,12 +168,12 @@ class CanvasServer {
               properties: {
                 courseId: {
                   type: "string",
-                  description: "The ID of the course",
+                  description: "The ID of the course"
                 },
                 assignmentId: {
                   type: "string",
-                  description: "The ID of the assignment",
-                },
+                  description: "The ID of the assignment"
+                }
               },
               required: ["courseId", "assignmentId"],
             },
@@ -179,15 +187,24 @@ class CanvasServer {
                 days: {
                   type: "number",
                   description: "Number of days to look back (default: 14)",
-                  default: 14,
-                },
-                courseId: {
-                  type: "string",
-                  description: "Optional: The ID of a specific course to fetch announcements for",
-                  required: false,
-                },
+                  default: 14
+                }
               },
               required: [],
+            },
+          },
+          {
+            name: "list-course-modules",
+            description: "List modules and items for a course, with student completion status",
+            inputSchema: {
+              type: "object",
+              properties: {
+                courseId: {
+                  type: "string",
+                  description: "The ID of the course"
+                }
+              },
+              required: ["courseId"],
             },
           },
           {
@@ -198,14 +215,64 @@ class CanvasServer {
               properties: {
                 courseId: {
                   type: "string",
-                  description: "The ID of the course",
+                  description: "The ID of the course"
                 },
                 searchTerm: {
                   type: "string",
-                  description: "Term to search for in file names",
-                },
+                  description: "Term to search for in file names"
+                }
               },
               required: ["courseId", "searchTerm"],
+            },
+          },
+          {
+            name: "get-unread-discussions",
+            description: "List unread discussion topics for a course",
+            inputSchema: {
+              type: "object",
+              properties: {
+                courseId: {
+                  type: "string",
+                  description: "The ID of the course"
+                }
+              },
+              required: ["courseId"],
+            },
+          },
+          {
+            name: "view-discussion-topic",
+            description: "Retrieve posts/replies for a discussion topic",
+            inputSchema: {
+              type: "object",
+              properties: {
+                courseId: {
+                  type: "string",
+                  description: "The ID of the course"
+                },
+                topicId: {
+                  type: "string",
+                  description: "The ID of the discussion topic"
+                }
+              },
+              required: ["courseId", "topicId"],
+            },
+          },
+          {
+            name: "get-my-quiz-submission",
+            description: "Retrieve student's submission details for a quiz",
+            inputSchema: {
+              type: "object",
+              properties: {
+                courseId: {
+                  type: "string",
+                  description: "The ID of the course"
+                },
+                quizId: {
+                  type: "string",
+                  description: "The ID of the quiz"
+                }
+              },
+              required: ["courseId", "quizId"],
             },
           },
           {
@@ -216,8 +283,8 @@ class CanvasServer {
               properties: {
                 courseId: {
                   type: "string",
-                  description: "The ID of the course to search within.",
-                },
+                  description: "The ID of the course to search within."
+                }
               },
               required: ["courseId"],
             },
@@ -228,6 +295,7 @@ class CanvasServer {
       return toolsResponse;
     });
 
+    // Handle tool execution
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
       console.error(`Received CallToolRequest for: ${name} with args: ${JSON.stringify(args)}`);
@@ -235,58 +303,92 @@ class CanvasServer {
       try {
         switch (name) {
           case "list-courses":
-            return await listCourses(this.axiosInstance);
+            return await this.handleListCourses();
 
           case "list-rubrics":
             if (!args || typeof args.courseId !== 'string') {
               throw new Error("Missing or invalid 'courseId' argument for list-rubrics");
             }
-            return await listRubrics(this.axiosInstance, args as { courseId: string });
+            return await this.handleListRubrics(args as { courseId: string });
 
           case "list-assignments":
-            if (!args || typeof args.courseId !== 'string') {
-              throw new Error("Missing or invalid 'courseId' argument for list-assignments");
-            }
-            return await listAssignments(this.axiosInstance, args as { courseId: string; studentId?: string; includeSubmissionHistory?: boolean });
+             if (!args || typeof args.courseId !== 'string') {
+               throw new Error("Missing or invalid 'courseId' argument for list-assignments");
+             }
+             // Pass the whole args object
+             return await this.handleListAssignments(args as { courseId: string; studentId?: string; includeSubmissionHistory?: boolean });
 
           case "list-sections":
             if (!args || typeof args.courseId !== 'string') {
               throw new Error("Missing or invalid 'courseId' argument for list-sections");
             }
-            return await listSections(this.axiosInstance, args as { courseId: string; includeStudentCount?: boolean });
+            // Pass the whole args object
+            return await this.handleListSections(args as { courseId: string; includeStudentCount?: boolean });
 
+          // Student-specific tools delegated to StudentTools class
           case "get-my-todo-items":
-            return await getMyTodoItems(this.axiosInstance);
+            return await this.studentTools.getMyTodoItems();
 
           case "get-upcoming-assignments":
-            return await getUpcomingAssignments(this.axiosInstance);
+            return await this.studentTools.getUpcomingAssignments();
 
           case "get-course-grade":
             if (!args || typeof args.courseId !== 'string') {
               throw new Error("Missing or invalid 'courseId' argument for get-course-grade");
             }
-            return await getCourseGrade(this.axiosInstance, args as { courseId: string });
+            return await this.studentTools.getCourseGrade(args as { courseId: string });
 
           case "get-assignment-details":
             if (!args || typeof args.courseId !== 'string' || typeof args.assignmentId !== 'string') {
               throw new Error("Missing or invalid 'courseId' or 'assignmentId' arguments for get-assignment-details");
             }
-            return await getAssignmentDetails(this.axiosInstance, args as { courseId: string; assignmentId: string });
+            return await this.studentTools.getAssignmentDetails(args as { courseId: string; assignmentId: string });
 
           case "get-recent-announcements":
-            return await getRecentAnnouncements(this.axiosInstance, args as { days?: number, courseId?: string });
+            // Args are optional here (days, courseId)
+            return await this.studentTools.getRecentAnnouncements(args as { days?: number, courseId?: string });
 
-          case "find-course-files":
+          // case "list-course-modules": // Method not yet implemented in StudentTools
+          //   if (!args || typeof args.courseId !== 'string') {
+          //     throw new Error("Missing or invalid 'courseId' argument for list-course-modules");
+          //   }
+          //   // return await this.studentTools.listCourseModules(args as { courseId: string });
+          //   throw new Error("Tool 'list-course-modules' is not yet implemented.");
+
+          case "find-course-files": // Now implemented
             if (!args || typeof args.courseId !== 'string' || typeof args.searchTerm !== 'string') {
               throw new Error("Missing or invalid 'courseId' or 'searchTerm' arguments for find-course-files");
             }
-            return await findCourseFiles(this.axiosInstance, args as { courseId: string; searchTerm: string });
+            return await this.studentTools.findCourseFiles(args as { courseId: string; searchTerm: string });
 
+          // case "get-unread-discussions": // Method not yet implemented in StudentTools
+          //   if (!args || typeof args.courseId !== 'string') {
+          //     throw new Error("Missing or invalid 'courseId' argument for get-unread-discussions");
+          //   }
+          //   // return await this.studentTools.getUnreadDiscussions(args as { courseId: string });
+          //    throw new Error("Tool 'get-unread-discussions' is not yet implemented.");
+
+          // case "view-discussion-topic": // Method not yet implemented in StudentTools
+          //   if (!args || typeof args.courseId !== 'string' || typeof args.topicId !== 'string') {
+          //     throw new Error("Missing or invalid 'courseId' or 'topicId' arguments for view-discussion-topic");
+          //   }
+          //   // return await this.studentTools.viewDiscussionTopic(args as { courseId: string; topicId: string });
+          //    throw new Error("Tool 'view-discussion-topic' is not yet implemented.");
+
+          // case "get-my-quiz-submission": // Method not yet implemented in StudentTools
+          //   if (!args || typeof args.courseId !== 'string' || typeof args.quizId !== 'string') {
+          //     throw new Error("Missing or invalid 'courseId' or 'quizId' arguments for get-my-quiz-submission");
+          //   }
+          //   // return await this.studentTools.getMyQuizSubmission(args as { courseId: string; quizId: string });
+          //    throw new Error("Tool 'get-my-quiz-submission' is not yet implemented.");
+
+          // Add the case for the new tool
           case "find-office-hours-info":
             if (!args || typeof args.courseId !== 'string') {
               throw new Error("Missing or invalid 'courseId' argument for find-office-hours-info");
             }
-            return await findOfficeHoursInfo(this.axiosInstance, args as { courseId: string });
+            // Call the new handler method instead of directly calling studentTools
+            return await this.handleFindOfficeHours(args as { courseId: string });
 
           default:
             throw new Error(`Unknown tool: ${name}`);
@@ -296,12 +398,13 @@ class CanvasServer {
         return {
           error: {
             code: -32000,
-            message: `Tool execution failed: ${error.message}`,
-          },
+            message: `Tool execution failed: ${error.message}`
+          }
         };
       }
     });
 
+    // Add these handlers for prompts
     this.server.setRequestHandler(ListPromptsRequestSchema, async () => {
       return {
         prompts: [
@@ -312,14 +415,14 @@ class CanvasServer {
               {
                 name: "courseName",
                 description: "The name of the course to analyze",
-                required: true,
-              },
-            ],
+                required: true
+              }
+            ]
           },
           {
             name: "summarize-upcoming-week",
             description: "Summarize assignments and events due soon",
-            arguments: [],
+            arguments: []
           },
           {
             name: "check-my-grades",
@@ -328,9 +431,9 @@ class CanvasServer {
               {
                 name: "courseName",
                 description: "Name of the course (or 'all' for all active courses)",
-                required: true,
-              },
-            ],
+                required: true
+              }
+            ]
           },
           {
             name: "find-lecture-slides",
@@ -339,14 +442,14 @@ class CanvasServer {
               {
                 name: "courseName",
                 description: "Name of the course to search in",
-                required: true,
+                required: true
               },
               {
                 name: "topic",
                 description: "Topic to search for in the file names",
-                required: true,
-              },
-            ],
+                required: true
+              }
+            ]
           },
           {
             name: "what-did-i-miss",
@@ -355,11 +458,11 @@ class CanvasServer {
               {
                 name: "courseName",
                 description: "Name of the course to check recent activity",
-                required: true,
-              },
-            ],
-          },
-        ],
+                required: true
+              }
+            ]
+          }
+        ]
       };
     });
 
@@ -370,7 +473,7 @@ class CanvasServer {
       if (promptName === "analyze-rubric-statistics") {
         const courseName = promptArgs?.courseName;
         const today = new Date().toISOString().split('T')[0];
-
+        
         return {
           messages: [
             {
@@ -416,16 +519,17 @@ Please ensure all visualizations are clearly labeled with:
 - Axis labels
 - Legend showing assignments and score levels
 - Clear distinction between assignments
-- Percentage or count indicators where appropriate`,
-              },
-            },
-          ],
+- Percentage or count indicators where appropriate`
+              }
+            }
+          ]
         };
-      } else if (promptName === "summarize-upcoming-week") {
+      }
+      else if (promptName === "summarize-upcoming-week") {
         return {
           messages: [
             {
-              role: "user",
+              role: "user", 
               content: {
                 type: "text",
                 text: `Please provide a summary of my upcoming assignments and tasks for the next week. Follow these steps:
@@ -453,14 +557,15 @@ Please ensure all visualizations are clearly labeled with:
    - Any high-point assignments that deserve special attention
    - Any patterns or clusters of due dates I should be aware of
    
-Please format the information in a clean, scannable way, sorted by due date within each priority level.`,
-              },
-            },
-          ],
+Please format the information in a clean, scannable way, sorted by due date within each priority level.`
+              }
+            }
+          ]
         };
-      } else if (promptName === "check-my-grades") {
+      }
+      else if (promptName === "check-my-grades") {
         const courseName = promptArgs?.courseName;
-
+        
         return {
           messages: [
             {
@@ -471,8 +576,8 @@ Please format the information in a clean, scannable way, sorted by due date with
 
 1. Use the list-courses tool to find all my active courses.
 
-2. ${courseName?.toLowerCase() === 'all' ?
-                   `For each active course, use the get-course-grade tool to fetch my current grade information.` :
+2. ${courseName?.toLowerCase() === 'all' ? 
+                   `For each active course, use the get-course-grade tool to fetch my current grade information.` : 
                    `Find the course ID for "${courseName}" and use the get-course-grade tool to fetch my current grade information for that specific course.`}
 
 3. Present the grade information in a clear format that includes:
@@ -489,15 +594,16 @@ Please format the information in a clean, scannable way, sorted by due date with
    - Any courses where my grade might be concerning
    - Overall GPA if that information is calculable
 
-Please present this information in a straightforward manner that helps me understand my current academic standing.`,
-              },
-            },
-          ],
+Please present this information in a straightforward manner that helps me understand my current academic standing.`
+              }
+            }
+          ]
         };
-      } else if (promptName === "find-lecture-slides") {
+      }
+      else if (promptName === "find-lecture-slides") {
         const courseName = promptArgs?.courseName;
         const topic = promptArgs?.topic;
-
+        
         return {
           messages: [
             {
@@ -530,14 +636,15 @@ Please present this information in a straightforward manner that helps me unders
    - File names that suggest comprehensive content
    - File types that suggest presentation materials
 
-Please present the results in a clear, organized format that helps me quickly identify the most relevant lecture materials.`,
-              },
-            },
-          ],
+Please present the results in a clear, organized format that helps me quickly identify the most relevant lecture materials.`
+              }
+            }
+          ]
         };
-      } else if (promptName === "what-did-i-miss") {
+      }
+      else if (promptName === "what-did-i-miss") {
         const courseName = promptArgs?.courseName;
-
+        
         return {
           messages: [
             {
@@ -567,20 +674,364 @@ Please present the results in a clear, organized format that helps me quickly id
 
 5. Include a brief "Action Items" section highlighting any specific tasks I should complete to catch up.
 
-Please present this information in a clear, concise format that helps me quickly understand what's been happening in the course and what I need to do next.`,
-              },
-            },
-          ],
+Please present this information in a clear, concise format that helps me quickly understand what's been happening in the course and what I need to do next.`
+              }
+            }
+          ]
         };
       }
-
+      
+      // If prompt name doesn't match, return an empty messages array
+      // This satisfies the schema requirement for a 'messages' property.
       console.error(`Unknown prompt requested: ${promptName}`);
       return {
-        messages: [],
+        messages: [] 
       };
     });
   }
 
+  // Fetches and formats a list of all active courses from Canvas
+  private async handleListCourses() {
+    const maxRetries = 2; // Retry up to 2 times (3 attempts total)
+    const retryDelay = 1000; // 1 second delay between retries
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        console.error(`Attempt ${attempt + 1} to fetch courses...`); // Log attempt
+        const response = await this.axiosInstance.get('/api/v1/courses', {
+          params: {
+            enrollment_state: 'active',
+            state: ['available'],
+            per_page: 100,
+            include: ['term']
+          },
+          timeout: 15000 // Keep the 15-second timeout
+        });
+
+        const courses: Course[] = response.data;
+
+        const formattedCourses = courses
+          .filter(course => course.workflow_state === 'available')
+          .map((course: Course) => {
+            const termInfo = course.term ? ` (${course.term.name})` : '';
+            return `Course: ${course.name}${termInfo}\nID: ${course.id}\nCode: ${course.course_code}\n---`;
+          })
+          .join('\n');
+
+        // Success, return the result
+        return {
+          content: [
+            {
+              type: "text",
+              text: formattedCourses ?
+                `Available Courses:\n\n${formattedCourses}` :
+                "No active courses found.",
+            },
+          ],
+        };
+      } catch (error: unknown) {
+        console.error(`Attempt ${attempt + 1} failed.`); // Log failure
+
+        // Check if it's an Axios error and specifically ECONNRESET
+        if (axios.isAxiosError(error) && error.code === 'ECONNRESET') {
+          console.error(`Axios ECONNRESET error fetching courses (Attempt ${attempt + 1}/${maxRetries + 1}): ${error.message}`);
+          if (attempt < maxRetries) {
+            console.error(`Retrying in ${retryDelay / 1000} second(s)...`);
+            await delay(retryDelay); // Wait before retrying
+            continue; // Go to the next iteration of the loop
+          } else {
+            console.error("Max retries reached for ECONNRESET.");
+            // Fall through to throw the error after max retries
+          }
+        } else {
+           // Log other errors (Axios or non-Axios)
+           if (axios.isAxiosError(error)) {
+             console.error(`Axios error fetching courses: ${error.message}`, error.code, error.config?.url);
+           } else {
+             console.error("Non-Axios error fetching courses:", error);
+           }
+           // Don't retry for non-ECONNRESET errors, re-throw immediately
+           if (error instanceof Error) {
+             throw new Error(`Failed to fetch courses: ${error.message}`);
+           }
+           throw new Error('Failed to fetch courses: Unknown error');
+        }
+
+        // If loop finishes due to max retries on ECONNRESET, throw the last error
+        if (error instanceof Error) {
+          throw new Error(`Failed to fetch courses after ${maxRetries + 1} attempts: ${error.message}`);
+        }
+        throw new Error(`Failed to fetch courses after ${maxRetries + 1} attempts: Unknown error`);
+      }
+    }
+    // This part should theoretically not be reached due to return/throw inside the loop
+    throw new Error('handleListCourses exited loop unexpectedly.');
+  }
+
+  // Retrieves all rubrics associated with the specified course
+  private async handleListRubrics(args: any) {
+    const { courseId } = args;
+
+    try {
+      const response = await this.axiosInstance.get(
+        `/api/v1/courses/${courseId}/rubrics`
+      );
+      const rubrics: Rubric[] = response.data;
+
+      const formattedRubrics = rubrics.map((rubric: Rubric) => 
+        `Rubric: ${rubric.title}\nID: ${rubric.id}\nDescription: ${rubric.description || 'No description'}\n---`
+      ).join('\n');
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: formattedRubrics || "No rubrics found for this course",
+          },
+        ],
+      };
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        throw new Error(`Failed to fetch rubrics: ${error.message}`);
+      }
+      throw new Error('Failed to fetch rubrics: Unknown error');
+    }
+  }
+
+  // Gets all assignments for a course with optional student submission details
+  private async handleListAssignments(args: any) {
+    const { courseId, studentId, includeSubmissionHistory = false } = args;
+    let assignments: any[] = [];
+    let page = 1;
+    let hasMore = true;
+
+    try {
+      while (hasMore) {
+        const response = await this.axiosInstance.get(
+          `/api/v1/courses/${courseId}/assignments`,
+          {
+            params: {
+              per_page: 100,
+              page: page,
+              include: studentId ? ['submission', 'submission_comments', 'submission_history'] : [],
+              student_ids: studentId ? [studentId] : undefined,
+              order_by: 'position',
+            }
+          }
+        );
+
+        console.error(`Fetched ${response.data.length} assignments from page ${page}`);
+
+        const pageAssignments = response.data;
+        assignments.push(...pageAssignments);
+
+        hasMore = pageAssignments.length === 100;
+        page += 1;
+      }
+
+      const formattedAssignments = assignments
+        .map(assignment => {
+          const parts = [
+            `Assignment: ${assignment.name}`,
+            `ID: ${assignment.id}`,
+            `Due Date: ${assignment.due_at || 'No due date'}`,
+            `Points Possible: ${assignment.points_possible}`,
+            `Status: ${assignment.published ? 'Published' : 'Unpublished'}`
+          ];
+
+          if (assignment.submission) {
+            parts.push('Submission:');
+            parts.push(`  Status: ${assignment.submission.workflow_state}`);
+            parts.push(`  Submitted: ${assignment.submission.submitted_at || 'Not submitted'}`);
+            
+            if (assignment.submission.score !== undefined) {
+              parts.push(`  Score: ${assignment.submission.score}`);
+            }
+
+            if (assignment.submission.submission_comments?.length > 0) {
+              parts.push('  Teacher Comments:');
+              assignment.submission.submission_comments
+                .filter((comment: any) => comment.author?.role === 'teacher')
+                .forEach((comment: any) => {
+                  const date = new Date(comment.created_at).toLocaleString();
+                  parts.push(`    [${date}] ${comment.comment}`);
+                });
+          } else {
+            parts.push('  Teacher Comments: None');
+          }
+
+          if (includeSubmissionHistory && assignment.submission.versioned_submissions?.length > 0) {
+            parts.push('  Submission History:');
+            assignment.submission.versioned_submissions
+              .sort((a: any, b: any) => new Date(a.submitted_at).getTime() - new Date(b.submitted_at).getTime())
+              .forEach((version: any, index: number) => {
+                const date = new Date(version.submitted_at).toLocaleString();
+                parts.push(`    Attempt ${index + 1} [${date}]:`);
+                if (version.score !== undefined) {
+                  parts.push(`      Score: ${version.score}`);
+                }
+                if (version.grade) {
+                  parts.push(`      Grade: ${version.grade}`);
+                }
+                if (version.submission_type) {
+                  parts.push(`      Type: ${version.submission_type}`);
+                }
+              });
+          }
+        } else {
+          parts.push('Submission: No submission data available');
+        }
+
+        return parts.join('\n');
+      })
+      .join('\n---\n');
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: assignments.length > 0
+              ? `Assignments in course ${courseId}:\n\n${formattedAssignments}\n\nTotal assignments: ${assignments.length}`
+              : "No assignments found in this course.",
+          },
+        ],
+      };
+    } catch (error: any) {
+      console.error('Full error details:', error.response?.data || error);
+      if (error.response?.data?.errors) {
+        throw new Error(`Failed to fetch assignments: ${JSON.stringify(error.response.data.errors)}`);
+      }
+      if (error instanceof Error) {
+        throw new Error(`Failed to fetch assignments: ${error.message}`);
+      }
+      throw new Error('Failed to fetch assignments: Unknown error');
+    }
+  }
+
+  // Retrieves all sections for a course
+  private async handleListSections(args: any) {
+    const { courseId, includeStudentCount = false } = args;
+    let sections: any[] = [];
+    let page = 1;
+    let hasMore = true;
+
+    try {
+      while (hasMore) {
+        const response = await this.axiosInstance.get(
+          `/api/v1/courses/${courseId}/sections`,
+          {
+            params: {
+              per_page: 100,
+              page: page,
+              include: includeStudentCount ? ['total_students'] : []
+            }
+          }
+        );
+
+        const pageSections = response.data;
+        sections.push(...pageSections);
+
+        hasMore = pageSections.length === 100;
+        page += 1;
+      }
+
+      const formattedSections = sections
+        .map(section => {
+          const parts = [
+            `Name: ${section.name}`,
+            `ID: ${section.id}`,
+            `SIS ID: ${section.sis_section_id || 'N/A'}`
+          ];
+
+          if (section.start_at) {
+            parts.push(`Start Date: ${new Date(section.start_at).toLocaleDateString()}`);
+          }
+          if (section.end_at) {
+            parts.push(`End Date: ${new Date(section.end_at).toLocaleDateString()}`);
+          }
+
+          if (includeStudentCount) {
+            parts.push(`Total Students: ${section.total_students || 0}`);
+          }
+
+          if (section.restrict_enrollments_to_section_dates) {
+            parts.push('Restricted to Section Dates: Yes');
+          }
+
+          return parts.join('\n');
+        })
+        .join('\n---\n');
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: sections.length > 0
+              ? `Sections in course ${courseId}:\n\n${formattedSections}\n\nTotal sections: ${sections.length}`
+              : "No sections found in this course.",
+          },
+        ],
+      };
+    } catch (error: any) {
+      console.error('Full error details:', error.response?.data || error);
+      if (error.response?.status === 404) {
+        throw new Error(`Course ${courseId} not found`);
+      }
+      if (error.response?.data?.errors) {
+        throw new Error(`Failed to fetch sections: ${JSON.stringify(error.response.data.errors)}`);
+      }
+      if (error instanceof Error) {
+        throw new Error(`Failed to fetch sections: ${error.message}`);
+      }
+      throw new Error('Failed to fetch sections: Unknown error');
+    }
+  }
+
+  // New handler method for finding office hours
+  private async handleFindOfficeHours(args: { courseId: string }) {
+    try {
+      console.error(`Executing find-office-hours-info for course ${args.courseId}`);
+      const results = await this.studentTools.findOfficeHoursInfo(args);
+      console.error(`find-office-hours-info result: ${JSON.stringify(results).substring(0, 200)}...`);
+      return results;
+    } catch (error: any) {
+      console.error(`Error in handleFindOfficeHours: ${error.message}`);
+      return {
+        error: {
+          code: -32001,
+          message: `Tool execution failed for find-office-hours-info: ${error.message}`
+        }
+      };
+    }
+  }
+
+  // Helper method to fetch all pages
+  private async fetchAllPages(url: string, config: any): Promise<any[]> {
+    let results: any[] = [];
+    let page = 1;
+    let hasMore = true;
+
+    while (hasMore) {
+      const response = await this.axiosInstance.get(url, {
+        ...config,
+        params: {
+          ...config.params,
+          page: page
+        }
+      });
+
+      const pageData = response.data;
+      results.push(...pageData);
+
+      const perPage = config?.params?.per_page || 10;
+      hasMore = pageData.length === perPage;
+      page += 1;
+    }
+
+    return results;
+  }
+
+  // Starts the server using stdio transport
   public async start() {
     const transport = new StdioServerTransport();
     console.error("Attempting to connect server to stdio transport...");
@@ -594,16 +1045,19 @@ Please present this information in a clear, concise format that helps me quickly
   }
 }
 
+// Read configuration from environment variables
 const config: CanvasConfig = {
   apiToken: process.env.CANVAS_API_TOKEN || "",
   baseUrl: process.env.CANVAS_BASE_URL || "https://fhict.instructure.com",
 };
 
+// Validate configuration
 if (!config.apiToken) {
   console.error("Error: CANVAS_API_TOKEN environment variable is required");
   process.exit(1);
 }
 
+// Start the server
 const server = new CanvasServer(config);
 console.error("Starting Canvas MCP Server...");
 server.start().catch((error: unknown) => {

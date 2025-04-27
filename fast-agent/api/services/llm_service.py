@@ -9,15 +9,6 @@ import asyncio  # Import asyncio
 
 logger = logging.getLogger(__name__)
 
-# Define a maximum length for tool results to avoid overly large contexts
-MAX_TOOL_RESULT_LENGTH = 1000  # Adjust as needed (Reduced from 2000)
-
-# Define markers for tool call status updates
-TOOL_CALL_START_MARKER = "[TOOL_CALL_START]"
-TOOL_CALL_END_MARKER = "[TOOL_CALL_END]"
-
-SYSTEM_PROMPT = "You are a helpful assistant interacting with Canvas LMS via tools. When tool results are provided, focus on the most relevant information to answer the user's query concisely. Avoid simply repeating large sections of the tool output."
-
 class LLMService:
     def __init__(self):
         self.deepseek_api_key = os.environ.get("DEEPSEEK_API_KEY")
@@ -86,11 +77,7 @@ class LLMService:
             # --- First API Call (Non-Streaming) ---
             start_time_first_call = time.time()
             logger.info("Making first call to DeepSeek API (non-streaming)...")
-            formatted_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + [
-                {"role": m["role"], "content": m["content"]}
-                for m in current_messages
-                if isinstance(m, dict) and "role" in m and "content" in m
-            ]
+            formatted_messages = [{"role": m["role"], "content": m["content"]} for m in current_messages if isinstance(m, dict) and "role" in m and "content" in m]
             formatted_tools = tools if tools and all(isinstance(t, dict) for t in tools) else None
 
             response = self.client.chat.completions.create(
@@ -163,15 +150,7 @@ class LLMService:
                             function_response_content = f"Error executing tool {function_name}: {str(result)}"
                         else:
                             logger.info(f"Tool {function_name} executed successfully (in parallel).")
-                            raw_result_content = str(result)
-                            raw_result_len = len(raw_result_content)
-                            logger.info(f"Tool {function_name} raw result length: {raw_result_len}")
-                            if raw_result_len > MAX_TOOL_RESULT_LENGTH:
-                                logger.warning(f"Tool {function_name} result length ({raw_result_len}) exceeds max ({MAX_TOOL_RESULT_LENGTH}). Truncating.")
-                                function_response_content = raw_result_content[:MAX_TOOL_RESULT_LENGTH] + f"... (result truncated for brevity)"
-                            else:
-                                logger.info(f"Tool {function_name} result length ({raw_result_len}) is within limit ({MAX_TOOL_RESULT_LENGTH}). Not truncating.")
-                                function_response_content = raw_result_content
+                            function_response_content = str(result)
 
                         current_messages.append({
                             "tool_call_id": tool_call_id, "role": "tool", "name": function_name,
@@ -184,7 +163,7 @@ class LLMService:
 
                 logger.debug(f"Messages for second LLM call (non-streaming): {current_messages}")
                 
-                formatted_second_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + self._format_messages_for_api(current_messages)
+                formatted_second_messages = self._format_messages_for_api(current_messages)
 
                 # --- Second API Call (Non-Streaming) ---
                 start_time_second_call = time.time()
@@ -231,11 +210,7 @@ class LLMService:
             # --- First API Call (MUST be Non-Streaming to check for tools) ---
             start_time_first_call = time.time()
             logger.info("Making first call to DeepSeek API (non-streaming check for tools)...")
-            formatted_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + [
-                {"role": m["role"], "content": m["content"]}
-                for m in current_messages
-                if isinstance(m, dict) and "role" in m and "content" in m
-            ]
+            formatted_messages = [{"role": m["role"], "content": m["content"]} for m in current_messages if isinstance(m, dict) and "role" in m and "content" in m]
             formatted_tools = tools if tools and all(isinstance(t, dict) for t in tools) else None
 
             response = self.client.chat.completions.create(
@@ -259,16 +234,9 @@ class LLMService:
             # --- Handle Tool Calls (if any) ---
             if tool_calls and tool_executor:
                 start_time_tool_execution = time.time()
-                # --- Yield START marker --- 
-                tool_names = ", ".join([tc.function.name for tc in tool_calls])
-                start_marker_message = f"{TOOL_CALL_START_MARKER} Calling tool(s): {tool_names}...\n"
-                logger.info(f"Attempting to yield START marker: {start_marker_message.strip()}")
-                yield start_marker_message
-                
-                # Append the assistant's response message (requesting the tool call)
+                logger.info(f"Tool calls detected ({len(tool_calls)}). Executing tools before streaming final response.")
                 current_messages.append(response_message.model_dump(exclude_unset=True))
 
-                # --- Prepare tasks for parallel execution ---
                 tasks = []
                 tool_call_details = []
                 for tool_call in tool_calls:
@@ -296,13 +264,11 @@ class LLMService:
                             "content": f"Error preparing tool {function_name}: {str(e)}",
                         })
 
-                # --- Execute tasks concurrently ---
                 if tasks:
                     logger.info(f"Running {len(tasks)} tool tasks concurrently (streaming flow)...")
                     results = await asyncio.gather(*tasks, return_exceptions=True)
                     logger.info("Parallel tool execution finished (streaming flow).")
 
-                    # --- Process results ---
                     for i, result in enumerate(results):
                         tool_detail = tool_call_details[i]
                         tool_call_id = tool_detail["id"]
@@ -312,25 +278,11 @@ class LLMService:
                             function_response_content = f"Error executing tool {function_name}: {str(result)}"
                         else:
                             logger.info(f"Tool {function_name} executed successfully (in parallel).")
-                            raw_result_content = str(result)
-                            raw_result_len = len(raw_result_content)
-                            logger.info(f"Tool {function_name} raw result length: {raw_result_len}")
-                            if raw_result_len > MAX_TOOL_RESULT_LENGTH:
-                                logger.warning(f"Tool {function_name} result length ({raw_result_len}) exceeds max ({MAX_TOOL_RESULT_LENGTH}). Truncating.")
-                                function_response_content = raw_result_content[:MAX_TOOL_RESULT_LENGTH] + f"... (result truncated for brevity)"
-                            else:
-                                logger.info(f"Tool {function_name} result length ({raw_result_len}) is within limit ({MAX_TOOL_RESULT_LENGTH}). Not truncating.")
-                                function_response_content = raw_result_content
-
+                            function_response_content = str(result)
                         current_messages.append({
                             "tool_call_id": tool_call_id, "role": "tool", "name": function_name,
                             "content": function_response_content,
                         })
-
-                # --- Yield END marker --- 
-                end_marker_message = f"{TOOL_CALL_END_MARKER} Tool execution finished. Generating final response...\n"
-                logger.info(f"Attempting to yield END marker: {end_marker_message.strip()}")
-                yield end_marker_message
 
                 end_time_tool_execution = time.time()
                 duration_tool_execution = end_time_tool_execution - start_time_tool_execution
@@ -338,8 +290,7 @@ class LLMService:
 
                 logger.debug(f"Messages for second LLM call (streaming): {current_messages}")
                 
-                # --- Format messages for the second call ---
-                formatted_second_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + self._format_messages_for_api(current_messages)
+                formatted_second_messages = self._format_messages_for_api(current_messages)
 
                 # --- Second API Call (Streaming) ---
                 start_time_second_call = time.time()
@@ -350,22 +301,20 @@ class LLMService:
                     messages=formatted_second_messages,
                     max_tokens=2048,
                     temperature=0.7,
-                    stream=True # Enable streaming for the final response
+                    stream=True
                 )
-                end_time_second_call_setup = time.time() # Time to setup stream
+                end_time_second_call_setup = time.time()
                 logger.info(f"Second API call stream initiated in {end_time_second_call_setup - start_time_second_call:.2f} seconds.")
 
-                # Yield chunks from the stream
-                for chunk in stream_response:
-                    # Check if choices exist and have content
+                async for chunk in stream_response:
                     if chunk.choices and chunk.choices[0].delta:
-                         delta_content = chunk.choices[0].delta.content
-                         if delta_content:
+                        delta_content = chunk.choices[0].delta.content
+                        if delta_content:
                             yield delta_content
                 logger.info("Finished streaming response after tool execution.")
 
             else:
-                # No tool calls, yield the content from the first response as a single chunk
+                logger.info("No tool calls detected. Yielding content from first response.")
                 final_content = response_message.content
                 if final_content:
                     yield final_content

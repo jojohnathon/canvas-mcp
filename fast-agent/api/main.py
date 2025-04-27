@@ -2,12 +2,11 @@ import requests
 import os
 import json # Add json import
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request # Add Request
-from fastapi.responses import StreamingResponse # Add StreamingResponse
+from fastapi import FastAPI, HTTPException # Add HTTPException
 from datetime import datetime
 import logging
 from api.services.llm_service import llm_service # Change this import to get the instance directly
-from typing import List, Dict, Any, AsyncGenerator # Add typing imports, including AsyncGenerator
+from typing import List, Dict, Any # Add typing imports
 import time # Import time
 import httpx
 
@@ -207,36 +206,34 @@ async def execute_mcp_tool(tool_name: str, tool_args: dict) -> str:
 
 
 @app.post("/chat")
-async def chat(request: Request): # Change to use Request object
+async def chat(request: dict):
     """
     Process a chat message using LLMService, handling tools via execute_mcp_tool.
-    Supports both streaming and non-streaming responses.
     """
-    try:
-        body = await request.json()
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid JSON body")
-
-    message = body.get("message", "")
-    history = body.get("history", [])
-    stream = body.get("stream", False) # Get the stream parameter
+    message = request.get("message", "")
+    history = request.get("history", [])
     
     if not message:
         raise HTTPException(status_code=400, detail="Message cannot be empty")
     
     # Ensure history format is correct for LLMService (role, content)
+    # Note: LLMService now handles adding tool calls/results internally
     chat_history = []
     for msg in history:
+        # Basic validation, can be expanded
         if isinstance(msg, dict) and "role" in msg and "content" in msg:
              chat_history.append({"role": msg["role"], "content": msg["content"]})
         else:
             logger.warning(f"Skipping invalid history message: {msg}")
 
+    # Add current user message
     chat_history.append({"role": "user", "content": message})
 
     # --- Get and Format Tools ---
     try:
+        # Fetch tools using the existing /tools endpoint logic
         available_tools_raw = await get_tools() 
+        # Format for the LLM (OpenAI format)
         llm_formatted_tools = format_tools_for_llm(available_tools_raw)
         logger.info(f"Prepared {len(llm_formatted_tools)} tools for LLM.")
     except Exception as e:
@@ -244,41 +241,15 @@ async def chat(request: Request): # Change to use Request object
         llm_formatted_tools = None
     # --- End Get and Format Tools ---
 
-    # Process message with LLMService, providing the executor and stream flag
-    logger.info(f"Processing message with LLMService (stream={stream})...")
+    # Process message with LLMService, providing the executor
+    logger.info("Processing message with LLMService...")
+    response_content = await llm_service.generate_response(
+        messages=chat_history,
+        tools=llm_formatted_tools,
+        tool_executor=execute_mcp_tool # Pass the executor function
+    )
     
-    try:
-        response_generator_or_string = await llm_service.generate_response(
-            messages=chat_history,
-            tools=llm_formatted_tools,
-            tool_executor=execute_mcp_tool,
-            stream=stream # Pass the stream flag here
-        )
-    except Exception as e:
-        logger.exception("Error calling LLMService generate_response")
-        raise HTTPException(status_code=500, detail=f"Error processing message: {str(e)}")
-
-    if stream:
-        # Ensure it's an async generator before creating StreamingResponse
-        if not isinstance(response_generator_or_string, AsyncGenerator):
-             logger.error("Expected AsyncGenerator for streaming response, but got different type.")
-             # Fallback or raise error
-             async def error_stream():
-                 yield "Error: Backend failed to generate stream." 
-             return StreamingResponse(error_stream(), media_type="text/plain")
-        
-        logger.info("Returning StreamingResponse.")
-        return StreamingResponse(response_generator_or_string, media_type="text/plain")
-    else:
-        # Ensure it's a string for non-streaming response
-        if not isinstance(response_generator_or_string, str):
-             logger.error("Expected string for non-streaming response, but got different type.")
-             response_content = "Error: Backend generated unexpected response format."
-        else:
-             response_content = response_generator_or_string
-        
-        logger.info("Returning non-streaming JSON response.")
-        return {"response": response_content}
+    return {"response": response_content}
 
 @app.get("/tools")
 async def get_tools():
