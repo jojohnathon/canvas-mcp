@@ -1,3 +1,5 @@
+const logger = window.logger || console;
+
 document.addEventListener('DOMContentLoaded', () => {
   // DOM Elements
   const toolSelect = document.getElementById('toolSelect');
@@ -39,7 +41,7 @@ document.addEventListener('DOMContentLoaded', () => {
       availableTools = data.tools;
       populateToolSelect(availableTools);
     } catch (error) {
-      console.error('Error fetching tools:', error);
+      logger.error('Error fetching tools:', error);
       alert('Failed to fetch tools. See console for details.');
     }
   }
@@ -255,7 +257,7 @@ document.addEventListener('DOMContentLoaded', () => {
         courseSelect.classList.remove('d-none');
       }
     } catch (error) {
-      console.error('Error fetching courses:', error);
+      logger.error('Error fetching courses:', error);
       alert('Failed to fetch courses. See console for details.');
     } finally {
       loadCoursesBtn.disabled = false;
@@ -368,7 +370,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
     } catch (error) {
-      console.error('Error executing tool:', error);
+      logger.error('Error executing tool:', error);
       alert('Failed to execute tool. See console for details.');
     } finally {
       executeToolBtn.disabled = false;
@@ -386,7 +388,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 1500);
       })
       .catch(err => {
-        console.error('Failed to copy text: ', err);
+        logger.error('Failed to copy text: ', err);
       });
   }
 
@@ -403,7 +405,7 @@ document.addEventListener('DOMContentLoaded', () => {
         promptsList.classList.remove('d-none');
       }
     } catch (error) {
-      console.error('Error fetching prompts:', error);
+      logger.error('Error fetching prompts:', error);
       alert('Failed to fetch prompts. See console for details.');
     } finally {
       loadPromptsBtn.disabled = false;

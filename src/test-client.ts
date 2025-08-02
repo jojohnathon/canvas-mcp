@@ -4,6 +4,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { spawn } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { logger } from './logger.js';
 
 // Get directory of the current file
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -41,13 +42,13 @@ class CanvasTestClient {
     // Connect client to transport
     await this.client.connect(transport);
     
-    console.log("Test client connected to server");
+    logger.info("Test client connected to server");
   }
 
   async stop() {
     if (this.serverProcess) {
       this.serverProcess.kill();
-      console.log("Server process terminated");
+      logger.info("Server process terminated");
     }
   }
 
@@ -57,11 +58,11 @@ class CanvasTestClient {
   }
 
   async callTool(name: string, args: any = {}): Promise<ToolResponse> {
-    console.log(`Calling tool: ${name} with args:`, JSON.stringify(args, null, 2));
+    logger.info(`Calling tool: ${name} with args:`, JSON.stringify(args, null, 2));
     const start = Date.now();
     const response = await this.client.callTool({ name, arguments: args });
     const duration = Date.now() - start;
-    console.log(`Tool call completed in ${duration}ms`);
+    logger.info(`Tool call completed in ${duration}ms`);
     return response as ToolResponse;
   }
 
@@ -157,44 +158,44 @@ async function runTests() {
     await client.start();
     
     // List all available tools
-    console.log("Available tools:");
+      logger.info("Available tools:");
     const tools = await client.listTools();
-    console.log(tools.map(t => t.name).join(", "));
+      logger.info(tools.map(t => t.name).join(", "));
     
     // List courses
-    console.log("\nFetching courses...");
+      logger.info("\nFetching courses...");
     const coursesResponse = await client.listCourses();
     if (coursesResponse.content && Array.isArray(coursesResponse.content) && coursesResponse.content.length > 0) {
-      console.log(coursesResponse.content[0].text);
+        logger.info(coursesResponse.content[0].text);
       
       // Parse course ID from the output
       const courseIdMatch = coursesResponse.content[0].text.match(/ID: (\d+)/);
       if (courseIdMatch && courseIdMatch[1]) {
         const courseId = courseIdMatch[1];
-        console.log(`\nUsing course ID: ${courseId}`);
+          logger.info(`\nUsing course ID: ${courseId}`);
         
         // List assignments for the course
-        console.log("\nFetching assignments...");
+          logger.info("\nFetching assignments...");
         const assignmentsResponse = await client.listAssignments(courseId);
         if (assignmentsResponse.content && Array.isArray(assignmentsResponse.content) && assignmentsResponse.content.length > 0) {
-          console.log(assignmentsResponse.content[0].text);
+            logger.info(assignmentsResponse.content[0].text);
         }
         
         // List available prompts
-        console.log("\nAvailable prompts:");
+          logger.info("\nAvailable prompts:");
         const prompts = await client.listPrompts();
-        console.log(prompts.map(p => p.name).join(", "));
+          logger.info(prompts.map(p => p.name).join(", "));
         
         // Test a student tool
-        console.log("\nTesting student tools - Getting todo items...");
+          logger.info("\nTesting student tools - Getting todo items...");
         const todoResponse = await client.getMyTodoItems();
         if (todoResponse.content && Array.isArray(todoResponse.content) && todoResponse.content.length > 0) {
-          console.log(todoResponse.content[0].text);
+            logger.info(todoResponse.content[0].text);
         }
       }
     }
   } catch (error) {
-    console.error("Test failed:", error);
+      logger.error("Test failed:", error);
   } finally {
     await client.stop();
   }
@@ -202,7 +203,7 @@ async function runTests() {
 
 // Run tests if executed directly
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  runTests().catch(console.error);
+    runTests().catch((err) => logger.error(err));
 }
 
 export { CanvasTestClient }; 

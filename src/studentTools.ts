@@ -1,6 +1,7 @@
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
 // Import Page type
 import { CourseFile, DiscussionTopic, Module, TodoItem, Assignment, QuizSubmission, Announcement, CourseGrade, ModuleItem, DiscussionEntry, Page } from './types.js';
+import { logger } from './logger.js';
 
 // Helper function for delay
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -94,7 +95,7 @@ export class StudentTools {
             course_name: course.name
           }));
         } catch (error) {
-          console.error(`Error fetching assignments for course ${course.id}:`, error);
+          logger.error(`Error fetching assignments for course ${course.id}:`, error);
           return [];
         }
       });
@@ -276,7 +277,7 @@ export class StudentTools {
         const courseResponse = await this.axiosInstance.get(`/api/v1/courses/${args.courseId}`);
         courseMap.set(parseInt(args.courseId, 10), courseResponse.data.name);
       } catch (courseError: any) {
-        console.warn(`Could not fetch course name for course ${args.courseId}: ${courseError.message}`);
+        logger.warn(`Could not fetch course name for course ${args.courseId}: ${courseError.message}`);
       }
     } else {
       try {
@@ -288,7 +289,7 @@ export class StudentTools {
           courseMap.set(course.id, course.name);
         });
       } catch (courseError: any) {
-        console.error(`Failed to fetch active courses for announcements: ${courseError.message}`);
+        logger.error(`Failed to fetch active courses for announcements: ${courseError.message}`);
         return { content: [{ type: "text", text: `Could not list active courses to fetch announcements: ${courseError.message}` }] };
       }
     }
@@ -325,7 +326,7 @@ export class StudentTools {
         ],
       };
     } catch (error: any) {
-      console.error(`Error fetching announcements: ${error.message}`, error.response?.data);
+      logger.error(`Error fetching announcements: ${error.message}`, error.response?.data);
       const apiError = error.response?.data?.errors?.[0]?.message || error.message;
       throw new Error(`Failed to fetch announcements: ${apiError}`);
     }
@@ -336,7 +337,7 @@ export class StudentTools {
    */
   async findCourseFiles(args: { courseId: string; searchTerm: string }): Promise<{ content: { type: string; text: string }[] }> {
     const { courseId, searchTerm } = args;
-    console.log(`Searching files in course ${courseId} for term: ${searchTerm}`);
+    logger.info(`Searching files in course ${courseId} for term: ${searchTerm}`);
 
     try {
       const files: CourseFile[] = await this.fetchAllPages<CourseFile>(`/api/v1/courses/${courseId}/files`, {
@@ -367,7 +368,7 @@ export class StudentTools {
         ],
       };
     } catch (error: any) {
-      console.error(`Error searching files in course ${courseId}: ${error.message}`, error.response?.data);
+      logger.error(`Error searching files in course ${courseId}: ${error.message}`, error.response?.data);
       const apiError = error.response?.data?.errors?.[0]?.message || error.message;
       throw new Error(`Failed to search files: ${apiError}`);
     }
@@ -378,7 +379,7 @@ export class StudentTools {
    */
   async listCoursePages(args: { courseId: string }): Promise<Page[]> { // Return the raw Page array
     const { courseId } = args;
-    console.log(`Listing pages in course ${courseId}`);
+    logger.info(`Listing pages in course ${courseId}`);
 
     try {
       // Fetch only published pages, sort by title
@@ -392,7 +393,7 @@ export class StudentTools {
       });
       return pages; // Return the data directly
     } catch (error: any) {
-      console.error(`Error listing pages in course ${courseId}: ${error.message}`, error.response?.data);
+      logger.error(`Error listing pages in course ${courseId}: ${error.message}`, error.response?.data);
       const apiError = error.response?.data?.errors?.[0]?.message || error.message;
       // Re-throw the error so the caller (findOfficeHoursInfo) can handle it
       throw new Error(`Failed to list course pages: ${apiError}`);
@@ -404,7 +405,7 @@ export class StudentTools {
    */
   async getPageContent(args: { courseId: string; pageUrl: string }): Promise<Page | null> {
     const { courseId, pageUrl } = args;
-    console.log(`Fetching content for page ${pageUrl} in course ${courseId}`);
+    logger.info(`Fetching content for page ${pageUrl} in course ${courseId}`);
     try {
       // The pageUrl is the identifier used in the API endpoint
       const response = await this.axiosInstance.get<Page>(`/api/v1/courses/${courseId}/pages/${pageUrl}`);
@@ -412,10 +413,10 @@ export class StudentTools {
     } catch (error: any) {
       // Handle 404 Not Found gracefully
       if (axios.isAxiosError(error) && error.response?.status === 404) {
-        console.warn(`Page ${pageUrl} not found in course ${courseId}.`);
+        logger.warn(`Page ${pageUrl} not found in course ${courseId}.`);
         return null;
       }
-      console.error(`Error fetching page content for ${pageUrl} in course ${courseId}: ${error.message}`, error.response?.data);
+      logger.error(`Error fetching page content for ${pageUrl} in course ${courseId}: ${error.message}`, error.response?.data);
       const apiError = error.response?.data?.errors?.[0]?.message || error.message;
       // Re-throw other errors
       throw new Error(`Failed to fetch page content: ${apiError}`);
@@ -438,7 +439,7 @@ export class StudentTools {
 
     // 1. Search Files (by likely names)
     try {
-      console.log(`Searching files in course ${courseId} for names like: ${fileNameKeywords.join(', ')}`);
+      logger.info(`Searching files in course ${courseId} for names like: ${fileNameKeywords.join(', ')}`);
       let foundFiles: { display_name: string; url: string }[] = [];
 
       for (const term of fileNameKeywords) {
@@ -460,7 +461,7 @@ export class StudentTools {
             });
           }
         } catch (fileError: any) {
-          console.warn(`Minor error searching files for name "${term}": ${fileError.message}`);
+          logger.warn(`Minor error searching files for name "${term}": ${fileError.message}`);
           errors.push(`Minor error searching files for name '${term}': ${fileError.message}`);
         }
         await delay(150); // Small delay between file searches
@@ -474,13 +475,13 @@ export class StudentTools {
         }
       }
     } catch (error: any) {
-      console.error(`Error during file search process: ${error.message}`);
+      logger.error(`Error during file search process: ${error.message}`);
       errors.push(`Failed during file search: ${error.message}`);
     }
 
     // 2. Search Recent Announcements (for keywords in content)
     try {
-      console.log(`Searching recent announcements in course ${courseId} for keywords: ${contentKeywords.join(', ')}`);
+      logger.info(`Searching recent announcements in course ${courseId} for keywords: ${contentKeywords.join(', ')}`);
       const announcementResult = await this.getRecentAnnouncements({ days: 30, courseId: courseId });
       let relevantAnnouncements: string[] = [];
 
@@ -514,13 +515,13 @@ export class StudentTools {
         }
       }
     } catch (error: any) {
-      console.error(`Error searching announcements: ${error.message}`);
+      logger.error(`Error searching announcements: ${error.message}`);
       errors.push(`Failed to search announcements: ${error.message}`);
     }
 
     // 3. Search Course Pages (for keywords in content, highlighting syllabus)
     try {
-      console.log(`Searching course pages in course ${courseId} for keywords: ${contentKeywords.join(', ')}`);
+      logger.info(`Searching course pages in course ${courseId} for keywords: ${contentKeywords.join(', ')}`);
       const pages = await this.listCoursePages({ courseId });
       let relevantPages: { title: string; url: string }[] = []; // General relevant pages
       syllabusPages = []; // Reset syllabusPages for this run
@@ -553,7 +554,7 @@ export class StudentTools {
               }
             }
           } catch (pageContentError: any) {
-            console.warn(`Could not fetch or search content for page "${page.title}": ${pageContentError.message}`);
+            logger.warn(`Could not fetch or search content for page "${page.title}": ${pageContentError.message}`);
           }
           await delay(150);
         }
@@ -576,7 +577,7 @@ export class StudentTools {
         }
       }
     } catch (error: any) {
-      console.error(`Error searching course pages: ${error.message}`);
+      logger.error(`Error searching course pages: ${error.message}`);
       errors.push(`Failed to search course pages: ${error.message}`);
     }
 
@@ -627,7 +628,7 @@ export class StudentTools {
     let url: string | null = initialUrl;
     const requestConfig = { ...config };
 
-    console.log(`Fetching all pages starting from: ${url}`);
+    logger.info(`Fetching all pages starting from: ${url}`);
 
     while (url) {
       try {
@@ -644,19 +645,19 @@ export class StudentTools {
             const match: RegExpMatchArray | null = nextLink.match(/<(.*?)>/);
             if (match && match[1]) {
               url = match[1];
-              console.log(`Found next page link: ${url}`);
+              logger.info(`Found next page link: ${url}`);
               if (url) await delay(100);
             }
           }
         }
       } catch (error: any) {
-        console.error(`Error fetching page ${url}: ${error.message}`, error.response?.data);
+        logger.error(`Error fetching page ${url}: ${error.message}`, error.response?.data);
         const apiError = error.response?.data?.errors?.[0]?.message || error.message;
         throw new Error(`Failed during pagination at ${url}: ${apiError}`);
       }
     }
 
-    console.log(`Finished fetching all pages. Total items: ${results.length}`);
+    logger.info(`Finished fetching all pages. Total items: ${results.length}`);
     return results;
   }
 

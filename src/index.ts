@@ -12,6 +12,7 @@ import axios, { AxiosInstance } from 'axios';
 import { CanvasConfig, Course, Rubric } from './types.js';
 import { StudentTools } from './studentTools.js';
 import { z } from 'zod';
+import { logger } from './logger.js';
 
 // Helper function for delay
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -59,7 +60,7 @@ class CanvasServer {
   private setupRequestHandlers() {
     // List available tools
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
-      console.error("Received ListToolsRequest");
+      logger.error("Received ListToolsRequest");
       const toolsResponse = {
         tools: [
           {
@@ -291,14 +292,14 @@ class CanvasServer {
           },
         ],
       };
-      console.error("Sending ListToolsResponse:", JSON.stringify(toolsResponse).substring(0, 200) + '...');
+      logger.error("Sending ListToolsResponse:", JSON.stringify(toolsResponse).substring(0, 200) + '...');
       return toolsResponse;
     });
 
     // Handle tool execution
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
-      console.error(`Received CallToolRequest for: ${name} with args: ${JSON.stringify(args)}`);
+      logger.error(`Received CallToolRequest for: ${name} with args: ${JSON.stringify(args)}`);
 
       try {
         switch (name) {
@@ -394,7 +395,7 @@ class CanvasServer {
             throw new Error(`Unknown tool: ${name}`);
         }
       } catch (error: any) {
-        console.error(`Error executing tool '${name}':`, error);
+        logger.error(`Error executing tool '${name}':`, error);
         return {
           error: {
             code: -32000,
@@ -683,7 +684,7 @@ Please present this information in a clear, concise format that helps me quickly
       
       // If prompt name doesn't match, return an empty messages array
       // This satisfies the schema requirement for a 'messages' property.
-      console.error(`Unknown prompt requested: ${promptName}`);
+      logger.error(`Unknown prompt requested: ${promptName}`);
       return {
         messages: [] 
       };
@@ -697,7 +698,7 @@ Please present this information in a clear, concise format that helps me quickly
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        console.error(`Attempt ${attempt + 1} to fetch courses...`); // Log attempt
+        logger.error(`Attempt ${attempt + 1} to fetch courses...`); // Log attempt
         const response = await this.axiosInstance.get('/api/v1/courses', {
           params: {
             enrollment_state: 'active',
@@ -730,26 +731,26 @@ Please present this information in a clear, concise format that helps me quickly
           ],
         };
       } catch (error: unknown) {
-        console.error(`Attempt ${attempt + 1} failed.`); // Log failure
+          logger.error(`Attempt ${attempt + 1} failed.`); // Log failure
 
         // Check if it's an Axios error and specifically ECONNRESET
         if (axios.isAxiosError(error) && error.code === 'ECONNRESET') {
-          console.error(`Axios ECONNRESET error fetching courses (Attempt ${attempt + 1}/${maxRetries + 1}): ${error.message}`);
+            logger.error(`Axios ECONNRESET error fetching courses (Attempt ${attempt + 1}/${maxRetries + 1}): ${error.message}`);
           if (attempt < maxRetries) {
-            console.error(`Retrying in ${retryDelay / 1000} second(s)...`);
+              logger.error(`Retrying in ${retryDelay / 1000} second(s)...`);
             await delay(retryDelay); // Wait before retrying
             continue; // Go to the next iteration of the loop
           } else {
-            console.error("Max retries reached for ECONNRESET.");
+              logger.error("Max retries reached for ECONNRESET.");
             // Fall through to throw the error after max retries
           }
         } else {
            // Log other errors (Axios or non-Axios)
-           if (axios.isAxiosError(error)) {
-             console.error(`Axios error fetching courses: ${error.message}`, error.code, error.config?.url);
-           } else {
-             console.error("Non-Axios error fetching courses:", error);
-           }
+             if (axios.isAxiosError(error)) {
+               logger.error(`Axios error fetching courses: ${error.message}`, error.code, error.config?.url);
+             } else {
+               logger.error("Non-Axios error fetching courses:", error);
+             }
            // Don't retry for non-ECONNRESET errors, re-throw immediately
            if (error instanceof Error) {
              throw new Error(`Failed to fetch courses: ${error.message}`);
@@ -820,7 +821,7 @@ Please present this information in a clear, concise format that helps me quickly
           }
         );
 
-        console.error(`Fetched ${response.data.length} assignments from page ${page}`);
+        logger.error(`Fetched ${response.data.length} assignments from page ${page}`);
 
         const pageAssignments = response.data;
         assignments.push(...pageAssignments);
@@ -897,7 +898,7 @@ Please present this information in a clear, concise format that helps me quickly
         ],
       };
     } catch (error: any) {
-      console.error('Full error details:', error.response?.data || error);
+      logger.error('Full error details:', error.response?.data || error);
       if (error.response?.data?.errors) {
         throw new Error(`Failed to fetch assignments: ${JSON.stringify(error.response.data.errors)}`);
       }
@@ -973,7 +974,7 @@ Please present this information in a clear, concise format that helps me quickly
         ],
       };
     } catch (error: any) {
-      console.error('Full error details:', error.response?.data || error);
+      logger.error('Full error details:', error.response?.data || error);
       if (error.response?.status === 404) {
         throw new Error(`Course ${courseId} not found`);
       }
@@ -990,12 +991,12 @@ Please present this information in a clear, concise format that helps me quickly
   // New handler method for finding office hours
   private async handleFindOfficeHours(args: { courseId: string }) {
     try {
-      console.error(`Executing find-office-hours-info for course ${args.courseId}`);
-      const results = await this.studentTools.findOfficeHoursInfo(args);
-      console.error(`find-office-hours-info result: ${JSON.stringify(results).substring(0, 200)}...`);
+        logger.error(`Executing find-office-hours-info for course ${args.courseId}`);
+        const results = await this.studentTools.findOfficeHoursInfo(args);
+        logger.error(`find-office-hours-info result: ${JSON.stringify(results).substring(0, 200)}...`);
       return results;
     } catch (error: any) {
-      console.error(`Error in handleFindOfficeHours: ${error.message}`);
+        logger.error(`Error in handleFindOfficeHours: ${error.message}`);
       return {
         error: {
           code: -32001,
@@ -1034,12 +1035,12 @@ Please present this information in a clear, concise format that helps me quickly
   // Starts the server using stdio transport
   public async start() {
     const transport = new StdioServerTransport();
-    console.error("Attempting to connect server to stdio transport...");
+    logger.error("Attempting to connect server to stdio transport...");
     try {
       await this.server.connect(transport);
-      console.error("Canvas MCP Server successfully connected and running on stdio");
+      logger.error("Canvas MCP Server successfully connected and running on stdio");
     } catch (error: unknown) {
-      console.error("Error connecting server to stdio transport:", error);
+      logger.error("Error connecting server to stdio transport:", error);
       throw error;
     }
   }
@@ -1053,14 +1054,14 @@ const config: CanvasConfig = {
 
 // Validate configuration
 if (!config.apiToken) {
-  console.error("Error: CANVAS_API_TOKEN environment variable is required");
+  logger.error("Error: CANVAS_API_TOKEN environment variable is required");
   process.exit(1);
 }
 
 // Start the server
 const server = new CanvasServer(config);
-console.error("Starting Canvas MCP Server...");
+logger.error("Starting Canvas MCP Server...");
 server.start().catch((error: unknown) => {
-  console.error("Fatal error during server startup:", error);
+  logger.error("Fatal error during server startup:", error);
   process.exit(1);
 });
