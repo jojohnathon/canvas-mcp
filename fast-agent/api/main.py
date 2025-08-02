@@ -262,40 +262,39 @@ async def get_tools():
     # ]
     # all_tools.extend(local_tools)
 
-    # Fetch tools from MCP server via the webui bridge
+    # Fetch tools from the MCP server
     try:
-        # Use the correct path exposed by webui/server.js
         mcp_tools_url = f"{MCP_URL}/api/tools"
-        logger.info(f"Fetching tools from MCP bridge: {mcp_tools_url}")
+        logger.info(f"Fetching tools from MCP server: {mcp_tools_url}")
         response = requests.get(mcp_tools_url, timeout=10)
         response.raise_for_status() # This would raise an error if status != 2xx
 
         # Log the raw JSON response text - CHANGED TO DEBUG
         raw_response_text = response.text
-        logger.debug(f"Raw text response from MCP bridge /api/tools: {raw_response_text}")
+        logger.debug(f"Raw text response from MCP server /api/tools: {raw_response_text}")
 
         # Log the parsed JSON response - CHANGED TO DEBUG (removed indent)
         try:
             parsed_json = response.json()
-            logger.debug(f"Parsed JSON response from MCP bridge /api/tools: {json.dumps(parsed_json)}")
+            logger.debug(f"Parsed JSON response from MCP server /api/tools: {json.dumps(parsed_json)}")
         except json.JSONDecodeError as json_err:
-            logger.error(f"Failed to parse JSON response from bridge: {json_err}")
+            logger.error(f"Failed to parse JSON response from MCP server: {json_err}")
             logger.error(f"Raw text was: {raw_response_text}")
             parsed_json = {} # Avoid further errors
 
         # Get the tools list from the 'result' object
         mcp_tools_raw = parsed_json.get("result", {}).get("tools", [])
         # Log the extracted list - CHANGED TO DEBUG (removed indent)
-        logger.debug(f"Extracted 'tools' list from bridge response: {json.dumps(mcp_tools_raw)}")
+        logger.debug(f"Extracted 'tools' list from server response: {json.dumps(mcp_tools_raw)}")
 
         if isinstance(mcp_tools_raw, list):
-            logger.info(f"Successfully fetched {len(mcp_tools_raw)} tools from MCP bridge. Transforming schema...")
+            logger.info(f"Successfully fetched {len(mcp_tools_raw)} tools from MCP server. Transforming schema...")
             transformed_mcp_tools = []
             for tool_index, tool in enumerate(mcp_tools_raw): # Add index for logging
                 try: # Add try/except around each tool transformation
                     logger.debug(f"Processing raw tool #{tool_index}: {tool}")
                     if not isinstance(tool, dict):
-                        logger.warning(f"Skipping non-dict tool #{tool_index} received from MCP bridge: {tool}")
+                        logger.warning(f"Skipping non-dict tool #{tool_index} received from MCP server: {tool}")
                         continue
 
                     # Transform the inputSchema from MCP format to the format expected by Streamlit/LLM
