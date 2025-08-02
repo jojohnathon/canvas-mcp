@@ -1,18 +1,18 @@
-import 'dotenv/config';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   CallToolRequestSchema,
-  ListToolsRequestSchema,
-  ListPromptsRequestSchema,
   GetPromptRequestSchema,
-  GetPromptResultSchema, // Corrected import: Use GetPromptResultSchema
+  GetPromptResultSchema,
+  ListPromptsRequestSchema,
+  ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import axios, { AxiosInstance } from 'axios';
-import { CanvasConfig, Course, Rubric } from './types.js';
-import { StudentTools } from './studentTools.js';
+import 'dotenv/config';
 import { z } from 'zod';
 import { logger } from './logger.js';
+import { StudentTools } from './studentTools.js';
+import { CanvasConfig, Course, Rubric } from './types.js';
 
 // Helper function for delay
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -316,7 +316,7 @@ export class CanvasServer {
             if (!args || typeof args.courseId !== 'string') {
               throw new Error("Missing or invalid 'courseId' argument for list-rubrics");
             }
-            return await this.handleListRubrics(args as { courseId: string });
+            return await this.handleListRubrics(args as { courseId: string; });
 
           case 'list-assignments':
             if (!args || typeof args.courseId !== 'string') {
@@ -324,7 +324,7 @@ export class CanvasServer {
             }
             // Pass the whole args object
             return await this.handleListAssignments(
-              args as { courseId: string; studentId?: string; includeSubmissionHistory?: boolean }
+              args as { courseId: string; studentId?: string; includeSubmissionHistory?: boolean; }
             );
 
           case 'list-sections':
@@ -333,7 +333,7 @@ export class CanvasServer {
             }
             // Pass the whole args object
             return await this.handleListSections(
-              args as { courseId: string; includeStudentCount?: boolean }
+              args as { courseId: string; includeStudentCount?: boolean; }
             );
 
           // Student-specific tools delegated to StudentTools class
@@ -347,7 +347,7 @@ export class CanvasServer {
             if (!args || typeof args.courseId !== 'string') {
               throw new Error("Missing or invalid 'courseId' argument for get-course-grade");
             }
-            return await this.studentTools.getCourseGrade(args as { courseId: string });
+            return await this.studentTools.getCourseGrade(args as { courseId: string; });
 
           case 'get-assignment-details':
             if (
@@ -360,13 +360,13 @@ export class CanvasServer {
               );
             }
             return await this.studentTools.getAssignmentDetails(
-              args as { courseId: string; assignmentId: string }
+              args as { courseId: string; assignmentId: string; }
             );
 
           case 'get-recent-announcements':
             // Args are optional here (days, courseId)
             return await this.studentTools.getRecentAnnouncements(
-              args as { days?: number; courseId?: string }
+              args as { days?: number; courseId?: string; }
             );
 
           // case "list-course-modules": // Method not yet implemented in StudentTools
@@ -383,7 +383,7 @@ export class CanvasServer {
               );
             }
             return await this.studentTools.findCourseFiles(
-              args as { courseId: string; searchTerm: string }
+              args as { courseId: string; searchTerm: string; }
             );
 
           // case "get-unread-discussions": // Method not yet implemented in StudentTools
@@ -413,7 +413,7 @@ export class CanvasServer {
               throw new Error("Missing or invalid 'courseId' argument for find-office-hours-info");
             }
             // Call the new handler method instead of directly calling studentTools
-            return await this.handleFindOfficeHours(args as { courseId: string });
+            return await this.handleFindOfficeHours(args as { courseId: string; });
 
           default:
             throw new Error(`Unknown tool: ${name}`);
@@ -601,11 +601,10 @@ Please format the information in a clean, scannable way, sorted by due date with
 
 1. Use the list-courses tool to find all my active courses.
 
-2. ${
-                    courseName?.toLowerCase() === 'all'
+2. ${courseName?.toLowerCase() === 'all'
                       ? `For each active course, use the get-course-grade tool to fetch my current grade information.`
                       : `Find the course ID for "${courseName}" and use the get-course-grade tool to fetch my current grade information for that specific course.`
-                  }
+                    }
 
 3. Present the grade information in a clear format that includes:
    - Course name
@@ -1027,7 +1026,7 @@ Please present this information in a clear, concise format that helps me quickly
   }
 
   // New handler method for finding office hours
-  private async handleFindOfficeHours(args: { courseId: string }) {
+  private async handleFindOfficeHours(args: { courseId: string; }) {
     try {
       logger.info(`Executing find-office-hours-info for course ${args.courseId}`);
       const results = await this.studentTools.findOfficeHoursInfo(args);

@@ -1,8 +1,8 @@
 import 'dotenv/config';
 
-import { logger } from './logger.js';
 import { fileURLToPath } from 'url';
 import { CanvasServer } from './canvasServer.js';
+import { logger } from './logger.js';
 import { CanvasConfig } from './types.js';
 
 const __filenameLocal = fileURLToPath(import.meta.url);

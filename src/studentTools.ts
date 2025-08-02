@@ -2,13 +2,13 @@ import axios, { AxiosInstance, AxiosResponse } from 'axios';
 import { createCanvasClient } from './api/canvasClient.js';
 import { logger } from './logger.js';
 import {
+  Announcement,
+  Assignment,
   CanvasConfig,
   CourseFile,
-  TodoItem,
-  Assignment,
-  Announcement,
   CourseGrade,
   Page,
+  TodoItem,
 } from './types.js';
 
 // Helper function for delay
@@ -54,11 +54,11 @@ export class StudentTools {
             text:
               todoItems.length > 0
                 ? `To-Do Items:\n\n${formattedResult
-                    .map(
-                      item =>
-                        `Title: ${item.title}\nType: ${item.type}\nCourse: ${item.course_name}\nDue Date: ${item.due_date}${item.points_possible ? `\nPoints: ${item.points_possible}` : ''}\nURL: ${item.url}\n---`
-                    )
-                    .join('\n')}`
+                  .map(
+                    item =>
+                      `Title: ${item.title}\nType: ${item.type}\nCourse: ${item.course_name}\nDue Date: ${item.due_date}${item.points_possible ? `\nPoints: ${item.points_possible}` : ''}\nURL: ${item.url}\n---`
+                  )
+                  .join('\n')}`
                 : 'No to-do items found.',
           },
         ],
@@ -130,11 +130,11 @@ export class StudentTools {
             text:
               assignments.length > 0
                 ? `Upcoming Assignments:\n\n${assignments
-                    .map(
-                      assignment =>
-                        `Assignment: ${assignment.name}\nCourse: ${assignment.course_name}\nDue Date: ${assignment.due_at ? new Date(assignment.due_at).toLocaleString() : 'No due date'}\nPoints: ${assignment.points_possible}\n${assignment.submission ? `Submitted: ${assignment.submission.submitted_at ? 'Yes' : 'No'}\nScore: ${assignment.submission.score !== null ? assignment.submission.score : 'Not graded'}` : 'No submission information'}\nURL: ${assignment.html_url}\n---`
-                    )
-                    .join('\n')}`
+                  .map(
+                    assignment =>
+                      `Assignment: ${assignment.name}\nCourse: ${assignment.course_name}\nDue Date: ${assignment.due_at ? new Date(assignment.due_at).toLocaleString() : 'No due date'}\nPoints: ${assignment.points_possible}\n${assignment.submission ? `Submitted: ${assignment.submission.submitted_at ? 'Yes' : 'No'}\nScore: ${assignment.submission.score !== null ? assignment.submission.score : 'Not graded'}` : 'No submission information'}\nURL: ${assignment.html_url}\n---`
+                  )
+                  .join('\n')}`
                 : 'No upcoming assignments found.',
           },
         ],
@@ -150,7 +150,7 @@ export class StudentTools {
   /**
    * Fetch student's current grade in a specific course
    */
-  async getCourseGrade(args: { courseId: string }) {
+  async getCourseGrade(args: { courseId: string; }) {
     const { courseId } = args;
 
     try {
@@ -214,7 +214,7 @@ export class StudentTools {
   /**
    * Fetch details for a specific assignment including submission status
    */
-  async getAssignmentDetails(args: { courseId: string; assignmentId: string }) {
+  async getAssignmentDetails(args: { courseId: string; assignmentId: string; }) {
     const { courseId, assignmentId } = args;
 
     try {
@@ -239,18 +239,18 @@ export class StudentTools {
         points_possible: assignment.points_possible,
         submission_status: submission
           ? {
-              submitted: !!submission.submitted_at,
-              submitted_at: submission.submitted_at,
-              late: submission.late,
-              missing: submission.missing,
-              score: submission.score,
-              grade: submission.grade,
-              feedback: submission.submission_comments?.map((comment: any) => ({
-                author: comment.author_name,
-                comment: comment.comment,
-                created_at: comment.created_at,
-              })),
-            }
+            submitted: !!submission.submitted_at,
+            submitted_at: submission.submitted_at,
+            late: submission.late,
+            missing: submission.missing,
+            score: submission.score,
+            grade: submission.grade,
+            feedback: submission.submission_comments?.map((comment: any) => ({
+              author: comment.author_name,
+              comment: comment.comment,
+              created_at: comment.created_at,
+            })),
+          }
           : null,
         html_url: assignment.html_url,
       };
@@ -259,16 +259,14 @@ export class StudentTools {
         content: [
           {
             type: 'text',
-            text: `Assignment Details:\n\nName: ${formattedAssignment.name}\nDue Date: ${formattedAssignment.due_at ? new Date(formattedAssignment.due_at).toLocaleString() : 'No due date'}\nPoints Possible: ${formattedAssignment.points_possible}\n\n${formattedAssignment.description ? `Description:\n${formattedAssignment.description.replace(/<[^>]*>/g, '')}\n\n` : ''}${
-              formattedAssignment.submission_status
-                ? `Submission Status:\nSubmitted: ${formattedAssignment.submission_status.submitted ? 'Yes' : 'No'}${formattedAssignment.submission_status.submitted_at ? `\nSubmission Date: ${new Date(formattedAssignment.submission_status.submitted_at).toLocaleString()}` : ''}${formattedAssignment.submission_status.late ? '\nStatus: Late' : ''}${formattedAssignment.submission_status.missing ? '\nStatus: Missing' : ''}\nScore: ${formattedAssignment.submission_status.score !== null ? formattedAssignment.submission_status.score : 'Not graded'}\nGrade: ${formattedAssignment.submission_status.grade || 'Not graded'}${
-                    formattedAssignment.submission_status.feedback &&
-                    formattedAssignment.submission_status.feedback.length > 0
-                      ? `\n\nFeedback:\n${formattedAssignment.submission_status.feedback.map((item: any) => `[${new Date(item.created_at).toLocaleString()}] ${item.author}: ${item.comment}`).join('\n')}`
-                      : ''
-                  }`
+            text: `Assignment Details:\n\nName: ${formattedAssignment.name}\nDue Date: ${formattedAssignment.due_at ? new Date(formattedAssignment.due_at).toLocaleString() : 'No due date'}\nPoints Possible: ${formattedAssignment.points_possible}\n\n${formattedAssignment.description ? `Description:\n${formattedAssignment.description.replace(/<[^>]*>/g, '')}\n\n` : ''}${formattedAssignment.submission_status
+                ? `Submission Status:\nSubmitted: ${formattedAssignment.submission_status.submitted ? 'Yes' : 'No'}${formattedAssignment.submission_status.submitted_at ? `\nSubmission Date: ${new Date(formattedAssignment.submission_status.submitted_at).toLocaleString()}` : ''}${formattedAssignment.submission_status.late ? '\nStatus: Late' : ''}${formattedAssignment.submission_status.missing ? '\nStatus: Missing' : ''}\nScore: ${formattedAssignment.submission_status.score !== null ? formattedAssignment.submission_status.score : 'Not graded'}\nGrade: ${formattedAssignment.submission_status.grade || 'Not graded'}${formattedAssignment.submission_status.feedback &&
+                  formattedAssignment.submission_status.feedback.length > 0
+                  ? `\n\nFeedback:\n${formattedAssignment.submission_status.feedback.map((item: any) => `[${new Date(item.created_at).toLocaleString()}] ${item.author}: ${item.comment}`).join('\n')}`
+                  : ''
+                }`
                 : 'No submission information available.'
-            }\n\nURL: ${formattedAssignment.html_url}`,
+              }\n\nURL: ${formattedAssignment.html_url}`,
           },
         ],
       };
@@ -286,7 +284,7 @@ export class StudentTools {
   async getRecentAnnouncements(args?: {
     days?: number;
     courseId?: string;
-  }): Promise<{ content: { type: string; text: string }[] }> {
+  }): Promise<{ content: { type: string; text: string; }[]; }> {
     const days = args?.days || 14;
     const endDate = new Date();
     const startDate = new Date();
@@ -404,7 +402,7 @@ export class StudentTools {
   async findCourseFiles(args: {
     courseId: string;
     searchTerm: string;
-  }): Promise<{ content: { type: string; text: string }[] }> {
+  }): Promise<{ content: { type: string; text: string; }[]; }> {
     const { courseId, searchTerm } = args;
     logger.info(`Searching files in course ${courseId} for term: ${searchTerm}`);
 
@@ -455,7 +453,7 @@ export class StudentTools {
   /**
    * Lists published pages within a specific course.
    */
-  async listCoursePages(args: { courseId: string }): Promise<Page[]> {
+  async listCoursePages(args: { courseId: string; }): Promise<Page[]> {
     // Return the raw Page array
     const { courseId } = args;
     logger.info(`Listing pages in course ${courseId}`);
@@ -481,7 +479,7 @@ export class StudentTools {
   /**
    * Fetches the full content of a specific course page.
    */
-  async getPageContent(args: { courseId: string; pageUrl: string }): Promise<Page | null> {
+  async getPageContent(args: { courseId: string; pageUrl: string; }): Promise<Page | null> {
     const { courseId, pageUrl } = args;
     logger.info(`Fetching content for page ${pageUrl} in course ${courseId}`);
     try {
@@ -508,7 +506,7 @@ export class StudentTools {
    */
   async findOfficeHoursInfo(args: {
     courseId: string;
-  }): Promise<{ content: { type: string; text: string }[] }> {
+  }): Promise<{ content: { type: string; text: string; }[]; }> {
     const { courseId } = args;
     // Keywords to search *within* page/announcement content - Added 'syllabus'
     const contentKeywords = [
@@ -533,14 +531,14 @@ export class StudentTools {
     ];
     const findings: string[] = [];
     const errors: string[] = [];
-    let syllabusPages: { title: string; url: string }[] = []; // Store pages specifically mentioning syllabus
+    let syllabusPages: { title: string; url: string; }[] = []; // Store pages specifically mentioning syllabus
 
     // 1. Search Files (by likely names)
     try {
       logger.info(
         `Searching files in course ${courseId} for names like: ${fileNameKeywords.join(', ')}`
       );
-      const foundFiles: { display_name: string; url: string }[] = [];
+      const foundFiles: { display_name: string; url: string; }[] = [];
 
       for (const term of fileNameKeywords) {
         try {
@@ -655,7 +653,7 @@ export class StudentTools {
         `Searching course pages in course ${courseId} for keywords: ${contentKeywords.join(', ')}`
       );
       const pages = await this.listCoursePages({ courseId });
-      const relevantPages: { title: string; url: string }[] = []; // General relevant pages
+      const relevantPages: { title: string; url: string; }[] = []; // General relevant pages
       syllabusPages = []; // Reset syllabusPages for this run
 
       if (pages.length > 0) {

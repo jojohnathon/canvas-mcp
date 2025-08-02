@@ -1,6 +1,6 @@
-import axios, { AxiosInstance, AxiosError } from 'axios';
-import { CanvasConfig } from '../types.js';
+import axios, { AxiosError, AxiosInstance } from 'axios';
 import { logger } from '../logger.js';
+import { CanvasConfig } from '../types.js';
 
 export function createCanvasClient(config: CanvasConfig): AxiosInstance {
   const instance = axios.create({

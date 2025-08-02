@@ -9,22 +9,25 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-
     // Additional strict settings for better code quality
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
-
     // Helpful for debugging
     "sourceMap": true,
     "declaration": true,
     "declarationMap": true,
-
     // Modern JS features
     "allowSyntheticDefaultImports": true,
     "resolveJsonModule": true
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "build", "__tests__"]
+  "include": [
+    "src/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "build",
+    "__tests__"
+  ]
 }

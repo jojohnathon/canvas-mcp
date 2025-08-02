@@ -9,7 +9,7 @@ import config from './config.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 interface ToolResponse {
-  content: Array<{ type: string; text: string }>;
+  content: Array<{ type: string; text: string; }>;
 }
 
 class CanvasTestClient {
