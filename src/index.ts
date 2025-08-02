@@ -5,7 +5,7 @@ import {
   ListToolsRequestSchema,
   ListPromptsRequestSchema,
   GetPromptRequestSchema,
-  GetPromptResultSchema, // Corrected import: Use GetPromptResultSchema
+  GetPromptResultSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import axios, { AxiosInstance } from 'axios';
 import { CanvasConfig, Course, Rubric } from './types.js';
