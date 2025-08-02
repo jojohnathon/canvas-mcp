@@ -1,6 +1,6 @@
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
-// Import Page type
-import { CourseFile, DiscussionTopic, Module, TodoItem, Assignment, QuizSubmission, Announcement, CourseGrade, ModuleItem, DiscussionEntry, Page } from './types.js';
+import { createCanvasClient } from './api/canvasClient.js';
+import { CanvasConfig, CourseFile, DiscussionTopic, Module, TodoItem, Assignment, QuizSubmission, Announcement, CourseGrade, ModuleItem, DiscussionEntry, Page } from './types.js';
 
 // Helper function for delay
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -9,13 +9,8 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 export class StudentTools {
   private axiosInstance: AxiosInstance;
 
-  constructor(baseUrl: string, apiToken: string) {
-    this.axiosInstance = axios.create({
-      baseURL: baseUrl,
-      headers: {
-        Authorization: `Bearer ${apiToken}`,
-      },
-    });
+  constructor(config: CanvasConfig) {
+    this.axiosInstance = createCanvasClient(config);
   }
 
   /**
@@ -94,7 +89,6 @@ export class StudentTools {
             course_name: course.name
           }));
         } catch (error) {
-          console.error(`Error fetching assignments for course ${course.id}:`, error);
           return [];
         }
       });
@@ -288,7 +282,6 @@ export class StudentTools {
           courseMap.set(course.id, course.name);
         });
       } catch (courseError: any) {
-        console.error(`Failed to fetch active courses for announcements: ${courseError.message}`);
         return { content: [{ type: "text", text: `Could not list active courses to fetch announcements: ${courseError.message}` }] };
       }
     }
@@ -325,7 +318,6 @@ export class StudentTools {
         ],
       };
     } catch (error: any) {
-      console.error(`Error fetching announcements: ${error.message}`, error.response?.data);
       const apiError = error.response?.data?.errors?.[0]?.message || error.message;
       throw new Error(`Failed to fetch announcements: ${apiError}`);
     }
@@ -367,7 +359,6 @@ export class StudentTools {
         ],
       };
     } catch (error: any) {
-      console.error(`Error searching files in course ${courseId}: ${error.message}`, error.response?.data);
       const apiError = error.response?.data?.errors?.[0]?.message || error.message;
       throw new Error(`Failed to search files: ${apiError}`);
     }
@@ -392,7 +383,6 @@ export class StudentTools {
       });
       return pages; // Return the data directly
     } catch (error: any) {
-      console.error(`Error listing pages in course ${courseId}: ${error.message}`, error.response?.data);
       const apiError = error.response?.data?.errors?.[0]?.message || error.message;
       // Re-throw the error so the caller (findOfficeHoursInfo) can handle it
       throw new Error(`Failed to list course pages: ${apiError}`);
@@ -415,7 +405,6 @@ export class StudentTools {
         console.warn(`Page ${pageUrl} not found in course ${courseId}.`);
         return null;
       }
-      console.error(`Error fetching page content for ${pageUrl} in course ${courseId}: ${error.message}`, error.response?.data);
       const apiError = error.response?.data?.errors?.[0]?.message || error.message;
       // Re-throw other errors
       throw new Error(`Failed to fetch page content: ${apiError}`);
@@ -474,7 +463,6 @@ export class StudentTools {
         }
       }
     } catch (error: any) {
-      console.error(`Error during file search process: ${error.message}`);
       errors.push(`Failed during file search: ${error.message}`);
     }
 
@@ -514,7 +502,6 @@ export class StudentTools {
         }
       }
     } catch (error: any) {
-      console.error(`Error searching announcements: ${error.message}`);
       errors.push(`Failed to search announcements: ${error.message}`);
     }
 
@@ -576,7 +563,6 @@ export class StudentTools {
         }
       }
     } catch (error: any) {
-      console.error(`Error searching course pages: ${error.message}`);
       errors.push(`Failed to search course pages: ${error.message}`);
     }
 
@@ -650,7 +636,6 @@ export class StudentTools {
           }
         }
       } catch (error: any) {
-        console.error(`Error fetching page ${url}: ${error.message}`, error.response?.data);
         const apiError = error.response?.data?.errors?.[0]?.message || error.message;
         throw new Error(`Failed during pagination at ${url}: ${apiError}`);
       }

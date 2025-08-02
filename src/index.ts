@@ -11,6 +11,7 @@ import {
 import axios, { AxiosInstance } from 'axios';
 import { CanvasConfig, Course, Rubric } from './types.js';
 import { StudentTools } from './studentTools.js';
+import { createCanvasClient } from './api/canvasClient.js';
 import { z } from 'zod';
 
 // Helper function for delay
@@ -41,15 +42,10 @@ class CanvasServer {
     );
 
     // Initialize axios instance with base configuration
-    this.axiosInstance = axios.create({
-      baseURL: this.config.baseUrl,
-      headers: {
-        Authorization: `Bearer ${this.config.apiToken}`,
-      },
-    });
+    this.axiosInstance = createCanvasClient(this.config);
 
     // Initialize student tools
-    this.studentTools = new StudentTools(this.config.baseUrl, this.config.apiToken);
+    this.studentTools = new StudentTools(this.config);
 
     // Set up request handlers
     this.setupRequestHandlers();
@@ -897,7 +893,6 @@ Please present this information in a clear, concise format that helps me quickly
         ],
       };
     } catch (error: any) {
-      console.error('Full error details:', error.response?.data || error);
       if (error.response?.data?.errors) {
         throw new Error(`Failed to fetch assignments: ${JSON.stringify(error.response.data.errors)}`);
       }
@@ -973,7 +968,6 @@ Please present this information in a clear, concise format that helps me quickly
         ],
       };
     } catch (error: any) {
-      console.error('Full error details:', error.response?.data || error);
       if (error.response?.status === 404) {
         throw new Error(`Course ${courseId} not found`);
       }
