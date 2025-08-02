@@ -1,6 +1,7 @@
-import axios, { AxiosInstance, AxiosResponse } from 'axios';
+import axios, { AxiosInstance } from 'axios';
 import { createCanvasClient } from './api/canvasClient.js';
 import { logger } from './logger.js';
+import { delay, fetchAllPages } from './utils.js';
 import {
   CanvasConfig,
   CourseFile,
@@ -10,9 +11,6 @@ import {
   CourseGrade,
   Page,
 } from './types.js';
-
-// Helper function for delay
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Main class for handling student tools
 export class StudentTools {
@@ -347,7 +345,8 @@ export class StudentTools {
     params.context_codes = contextCodes;
 
     try {
-      const announcements: Announcement[] = await this.fetchAllPages<Announcement>(
+      const announcements: Announcement[] = await fetchAllPages<Announcement>(
+        this.axiosInstance,
         '/api/v1/announcements',
         { params }
       );
@@ -409,7 +408,8 @@ export class StudentTools {
     logger.info(`Searching files in course ${courseId} for term: ${searchTerm}`);
 
     try {
-      const files: CourseFile[] = await this.fetchAllPages<CourseFile>(
+      const files: CourseFile[] = await fetchAllPages<CourseFile>(
+        this.axiosInstance,
         `/api/v1/courses/${courseId}/files`,
         {
           params: {
@@ -462,14 +462,18 @@ export class StudentTools {
 
     try {
       // Fetch only published pages, sort by title
-      const pages: Page[] = await this.fetchAllPages<Page>(`/api/v1/courses/${courseId}/pages`, {
-        params: {
-          published: true,
-          per_page: 50,
-          sort: 'title',
-          order: 'asc',
-        },
-      });
+      const pages: Page[] = await fetchAllPages<Page>(
+        this.axiosInstance,
+        `/api/v1/courses/${courseId}/pages`,
+        {
+          params: {
+            published: true,
+            per_page: 50,
+            sort: 'title',
+            order: 'asc',
+          },
+        }
+      );
       return pages; // Return the data directly
     } catch (error: any) {
       const apiError = error.response?.data?.errors?.[0]?.message || error.message;
@@ -776,52 +780,6 @@ export class StudentTools {
         },
       ],
     };
-  }
-
-  /**
-   * Helper method to fetch all pages for a paginated Canvas API endpoint.
-   * Assumes the API uses Link headers for pagination.
-   * Added generic type T for the expected data items.
-   */
-  private async fetchAllPages<T>(initialUrl: string, config?: any): Promise<T[]> {
-    let results: T[] = [];
-    let url: string | null = initialUrl;
-    const requestConfig = { ...config };
-
-    logger.debug(`Fetching all pages starting from: ${url}`);
-
-    while (url) {
-      try {
-        const response: AxiosResponse<T[]> = await this.axiosInstance.get<T[]>(url, requestConfig);
-        const responseData = Array.isArray(response.data) ? response.data : [response.data];
-        results = results.concat(responseData);
-
-        const linkHeader: string | undefined = response.headers['link'];
-        url = null;
-        if (linkHeader) {
-          const links: string[] = linkHeader.split(',');
-          const nextLink: string | undefined = links.find((link: string) =>
-            link.includes('rel="next"')
-          );
-          if (nextLink) {
-            const match: RegExpMatchArray | null = nextLink.match(/<(.*?)>/);
-            if (match && match[1]) {
-              url = match[1];
-              logger.debug(`Found next page link: ${url}`);
-              if (url) {
-                await delay(100);
-              }
-            }
-          }
-        }
-      } catch (error: any) {
-        const apiError = error.response?.data?.errors?.[0]?.message || error.message;
-        throw new Error(`Failed during pagination at ${url}: ${apiError}`);
-      }
-    }
-
-    logger.debug(`Finished fetching all pages. Total items: ${results.length}`);
-    return results;
   }
 
   // Helper method to format file size
