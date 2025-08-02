@@ -14,6 +14,7 @@ import { CanvasConfig, Course, Rubric } from './types.js';
 import { StudentTools } from './studentTools.js';
 import { createCanvasClient } from './api/canvasClient.js';
 import { z } from 'zod';
+import { logger } from './logger.js';
 
 import { fileURLToPath } from 'url';
 import { CanvasServer } from './canvasServer.js';
@@ -29,14 +30,14 @@ if (process.argv[1] === __filenameLocal) {
 
 
   if (!config.apiToken) {
-    console.error('Error: CANVAS_API_TOKEN environment variable is required');
+    logger.error('Error: CANVAS_API_TOKEN environment variable is required');
     process.exit(1);
   }
 
   const server = new CanvasServer(config);
-  console.error('Starting Canvas MCP Server...');
+  logger.info('Starting Canvas MCP Server...');
   server.start().catch((error: unknown) => {
-    console.error('Fatal error during server startup:', error);
+    logger.error('Fatal error during server startup:', error);
     process.exit(1);
   });
 
