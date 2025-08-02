@@ -14,8 +14,11 @@ Failed to connect to MCP server: HTTPConnectionPool(host='localhost', port=3001)
 **Solution:**
 
 1. **Start the MCP Server**
-   - Navigate to the webui directory: `cd ../webui`
-   - Run the server: `node server.js`
+   - From the repository root, build and start the server:
+     ```bash
+     npm run build
+     npm start
+     ```
    - Verify it starts without errors
 
 2. **Check Environment Configuration**
