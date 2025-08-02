@@ -49,7 +49,7 @@ export class CanvasServer {
     });
 
     // Initialize student tools
-    this.studentTools = new StudentTools(this.config.baseUrl, this.config.apiToken);
+    this.studentTools = new StudentTools(this.config);
 
     // Set up request handlers
     this.setupRequestHandlers();
