@@ -7,11 +7,11 @@ import {
   GetPromptRequestSchema,
   GetPromptResultSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import axios, { AxiosInstance } from 'axios';
-import { CanvasConfig, Course, Rubric } from './types.js';
-import { StudentTools } from './studentTools.js';
-import { z } from 'zod';
-import config from './config.js';
+import axios, { AxiosInstance } from "axios";
+import { CanvasConfig, Course, Rubric } from "./types.js";
+import { StudentTools } from "./studentTools.js";
+import { z } from "zod";
+import config from "./config.js";
 
 // Helper function for delay
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
