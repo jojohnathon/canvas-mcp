@@ -1,9 +1,9 @@
-import 'dotenv/config';
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { spawn } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import config from './config.js';
 
 // Get directory of the current file
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -28,7 +28,7 @@ class CanvasTestClient {
     // Start server process
     const serverPath = path.join(__dirname, 'index.js');
     this.serverProcess = spawn('node', [serverPath], {
-      env: process.env,
+      env: { ...process.env, CANVAS_API_TOKEN: config.apiToken, CANVAS_BASE_URL: config.baseUrl },
       stdio: ['pipe', 'pipe', 'inherit'] // redirect stdout to pipe, stderr to console
     });
     

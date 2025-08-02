@@ -1,4 +1,3 @@
-import 'dotenv/config';
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -12,6 +11,7 @@ import axios, { AxiosInstance } from 'axios';
 import { CanvasConfig, Course, Rubric } from './types.js';
 import { StudentTools } from './studentTools.js';
 import { z } from 'zod';
+import config from './config.js';
 
 // Helper function for delay
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -1043,18 +1043,6 @@ Please present this information in a clear, concise format that helps me quickly
       throw error;
     }
   }
-}
-
-// Read configuration from environment variables
-const config: CanvasConfig = {
-  apiToken: process.env.CANVAS_API_TOKEN || "",
-  baseUrl: process.env.CANVAS_BASE_URL || "https://fhict.instructure.com",
-};
-
-// Validate configuration
-if (!config.apiToken) {
-  console.error("Error: CANVAS_API_TOKEN environment variable is required");
-  process.exit(1);
 }
 
 // Start the server
