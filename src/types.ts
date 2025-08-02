@@ -25,18 +25,19 @@ export interface Rubric {
 }
 
 export interface Announcement {
+  id: number;
+  title: string;
+  message?: string; // HTML content
+  url?: string;
+  posted_at?: string; // ISO 8601 timestamp
+  context_code: string; // e.g., "course_123"
+  author?: {
+    // Author details might be included
     id: number;
-    title: string;
-    message?: string; // HTML content
-    url?: string;
-    posted_at?: string; // ISO 8601 timestamp
-    context_code: string; // e.g., "course_123"
-    author?: { // Author details might be included
-        id: number;
-        display_name: string;
-        avatar_image_url?: string;
-    };
-    // Add other relevant fields as needed
+    display_name: string;
+    avatar_image_url?: string;
+  };
+  // Add other relevant fields as needed
 }
 
 export interface CourseFile {
@@ -80,8 +81,8 @@ export interface TodoItem {
   ignore_url?: string;
   title?: string;
   needs_grading_count?: number;
-  quiz?: { id: number; }; // Added based on potential API response
-  discussion_topic?: { id: number; }; // Added based on potential API response
+  quiz?: { id: number }; // Added based on potential API response
+  discussion_topic?: { id: number }; // Added based on potential API response
 }
 
 export interface Assignment {
@@ -130,7 +131,15 @@ export interface ModuleItem {
   position: number;
   title: string;
   indent?: number;
-  type: 'File' | 'Page' | 'Discussion' | 'Assignment' | 'Quiz' | 'SubHeader' | 'ExternalUrl' | 'ExternalTool';
+  type:
+    | 'File'
+    | 'Page'
+    | 'Discussion'
+    | 'Assignment'
+    | 'Quiz'
+    | 'SubHeader'
+    | 'ExternalUrl'
+    | 'ExternalTool';
   content_id?: number;
   html_url?: string;
   url?: string; // For ExternalUrl type

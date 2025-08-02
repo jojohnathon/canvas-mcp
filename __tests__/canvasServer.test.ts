@@ -6,10 +6,22 @@ describe('CanvasServer.handleListCourses', () => {
     (server as any).axiosInstance = {
       get: jest.fn().mockResolvedValue({
         data: [
-          { id: 1, name: 'Course A', course_code: 'A101', term: { name: 'Fall' }, workflow_state: 'available' },
-          { id: 2, name: 'Course B', course_code: 'B202', term: { name: 'Winter' }, workflow_state: 'completed' }
-        ]
-      })
+          {
+            id: 1,
+            name: 'Course A',
+            course_code: 'A101',
+            term: { name: 'Fall' },
+            workflow_state: 'available',
+          },
+          {
+            id: 2,
+            name: 'Course B',
+            course_code: 'B202',
+            term: { name: 'Winter' },
+            workflow_state: 'completed',
+          },
+        ],
+      }),
     };
 
     const result = await (server as any).handleListCourses();
@@ -17,9 +29,9 @@ describe('CanvasServer.handleListCourses', () => {
       content: [
         {
           type: 'text',
-          text: 'Available Courses:\n\nCourse: Course A (Fall)\nID: 1\nCode: A101\n---'
-        }
-      ]
+          text: 'Available Courses:\n\nCourse: Course A (Fall)\nID: 1\nCode: A101\n---',
+        },
+      ],
     });
   });
 });

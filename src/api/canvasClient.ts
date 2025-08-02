@@ -1,5 +1,6 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import { CanvasConfig } from '../types.js';
+import { logger } from '../logger.js';
 
 export function createCanvasClient(config: CanvasConfig): AxiosInstance {
   const instance = axios.create({
@@ -14,7 +15,7 @@ export function createCanvasClient(config: CanvasConfig): AxiosInstance {
     (error: AxiosError) => {
       const status = error.response?.status;
       const data = error.response?.data;
-      console.error(`Canvas API error${status ? ` (${status})` : ''}:`, data ?? error.message);
+      logger.error(`Canvas API error${status ? ` (${status})` : ''}:`, data ?? error.message);
       return Promise.reject(error);
     }
   );

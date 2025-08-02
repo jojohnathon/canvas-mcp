@@ -11,10 +11,10 @@ describe('StudentTools.getMyTodoItems', () => {
             type: 'assignment',
             context_name: 'History 101',
             html_url: 'http://example.com/todo/1',
-            assignment: { points_possible: 5 }
-          }
-        ]
-      })
+            assignment: { points_possible: 5 },
+          },
+        ],
+      }),
     };
 
     const result = await tools.getMyTodoItems();
@@ -22,9 +22,9 @@ describe('StudentTools.getMyTodoItems', () => {
       content: [
         {
           type: 'text',
-          text: 'To-Do Items:\n\nTitle: Read Chapter\nType: assignment\nCourse: History 101\nDue Date: No due date\nPoints: 5\nURL: http://example.com/todo/1\n---'
-        }
-      ]
+          text: 'To-Do Items:\n\nTitle: Read Chapter\nType: assignment\nCourse: History 101\nDue Date: No due date\nPoints: 5\nURL: http://example.com/todo/1\n---',
+        },
+      ],
     });
   });
 });
@@ -32,21 +32,26 @@ describe('StudentTools.getMyTodoItems', () => {
 describe('StudentTools.getUpcomingAssignments', () => {
   it('formats upcoming assignments from multiple courses', async () => {
     const tools = new StudentTools('https://example.com', 'token');
-    const mockGet = jest.fn()
-      .mockResolvedValueOnce({ data: [
-        { id: 1, name: 'Course A' },
-        { id: 2, name: 'Course B' }
-      ] })
-      .mockResolvedValueOnce({ data: [
-        {
-          id: 101,
-          name: 'Assignment 1',
-          due_at: '2023-01-02T00:00:00Z',
-          points_possible: 10,
-          submission: { submitted_at: null, score: null },
-          html_url: 'http://example.com/assign/101'
-        }
-      ] })
+    const mockGet = jest
+      .fn()
+      .mockResolvedValueOnce({
+        data: [
+          { id: 1, name: 'Course A' },
+          { id: 2, name: 'Course B' },
+        ],
+      })
+      .mockResolvedValueOnce({
+        data: [
+          {
+            id: 101,
+            name: 'Assignment 1',
+            due_at: '2023-01-02T00:00:00Z',
+            points_possible: 10,
+            submission: { submitted_at: null, score: null },
+            html_url: 'http://example.com/assign/101',
+          },
+        ],
+      })
       .mockResolvedValueOnce({ data: [] });
     (tools as any).axiosInstance = { get: mockGet };
 
@@ -61,20 +66,23 @@ describe('StudentTools.getUpcomingAssignments', () => {
 describe('StudentTools.getCourseGrade', () => {
   it('formats course grade information', async () => {
     const tools = new StudentTools('https://example.com', 'token');
-    const mockGet = jest.fn()
+    const mockGet = jest
+      .fn()
       .mockResolvedValueOnce({ data: { id: 42, name: 'Biology' } })
-      .mockResolvedValueOnce({ data: [
-        {
-          type: 'student',
-          current_grade: '92%',
-          current_score: 92,
-          final_grade: 'A-',
-          final_score: 90
-        }
-      ] });
+      .mockResolvedValueOnce({
+        data: [
+          {
+            type: 'student',
+            current_grade: '92%',
+            current_score: 92,
+            final_grade: 'A-',
+            final_score: 90,
+          },
+        ],
+      });
     (tools as any).axiosInstance = {
       get: mockGet,
-      defaults: { baseURL: 'https://example.com' }
+      defaults: { baseURL: 'https://example.com' },
     };
 
     const result = await tools.getCourseGrade({ courseId: '42' });
@@ -84,4 +92,3 @@ describe('StudentTools.getCourseGrade', () => {
     expect(result.content[0].text).toContain('Final Grade: A-');
   });
 });
-
