@@ -13,9 +13,7 @@ import { z } from 'zod';
 import { logger } from './logger.js';
 import { StudentTools } from './studentTools.js';
 import { CanvasConfig, Course, Rubric } from './types.js';
-
-// Helper function for delay
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+import { delay } from './utils.js';
 
 // Handles integration with Canvas LMS through Model Context Protocol
 export class CanvasServer {
@@ -1044,31 +1042,6 @@ Please present this information in a clear, concise format that helps me quickly
   }
 
   // Helper method to fetch all pages
-  private async fetchAllPages(url: string, config: any): Promise<any[]> {
-    const results: any[] = [];
-    let page = 1;
-    let hasMore = true;
-
-    while (hasMore) {
-      const response = await this.axiosInstance.get(url, {
-        ...config,
-        params: {
-          ...config.params,
-          page: page,
-        },
-      });
-
-      const pageData = response.data;
-      results.push(...pageData);
-
-      const perPage = config?.params?.per_page || 10;
-      hasMore = pageData.length === perPage;
-      page += 1;
-    }
-
-    return results;
-  }
-
   // Starts the server using stdio transport
   public async start() {
     const transport = new StdioServerTransport();
