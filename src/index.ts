@@ -1,4 +1,3 @@
-import 'dotenv/config';
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -6,15 +5,13 @@ import {
   ListToolsRequestSchema,
   ListPromptsRequestSchema,
   GetPromptRequestSchema,
-  GetPromptResultSchema, // Corrected import: Use GetPromptResultSchema
+  GetPromptResultSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import axios, { AxiosInstance } from 'axios';
-import { CanvasConfig, Course, Rubric } from './types.js';
-import { StudentTools } from './studentTools.js';
-import { z } from 'zod';
-
-// Helper function for delay
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+import axios, { AxiosInstance } from "axios";
+import { CanvasConfig } from "./types.js";
+import { StudentTools } from "./studentTools.js";
+import { tools, Tool } from "./tools/index.js";
+import { z } from "zod";
 
 // Handles integration with Canvas LMS through Model Context Protocol
 class CanvasServer {
@@ -22,6 +19,7 @@ class CanvasServer {
   private config: CanvasConfig;
   private axiosInstance: AxiosInstance;
   private studentTools: StudentTools;
+  private tools: Tool[];
 
   constructor(config: CanvasConfig) {
     this.config = config;
@@ -51,6 +49,9 @@ class CanvasServer {
     // Initialize student tools
     this.studentTools = new StudentTools(this.config.baseUrl, this.config.apiToken);
 
+    // Load available tools
+    this.tools = tools;
+
     // Set up request handlers
     this.setupRequestHandlers();
   }
@@ -60,239 +61,13 @@ class CanvasServer {
     // List available tools
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       console.error("Received ListToolsRequest");
-      const toolsResponse = {
-        tools: [
-          {
-            name: "list-courses",
-            description: "List all courses for the authenticated user",
-            inputSchema: {
-              type: "object",
-              properties: {},
-              required: [],
-            },
-          },
-          {
-            name: "list-rubrics",
-            description: "List all rubrics for a specific course",
-            inputSchema: {
-              type: "object",
-              properties: {
-                courseId: {
-                  type: "string",
-                  description: "The ID of the course",
-                },
-              },
-              required: ["courseId"],
-            },
-          },
-          {
-            name: "list-assignments",
-            description: "Get a list of all assignments in a course with submission status for students",
-            inputSchema: {
-              type: "object",
-              properties: {
-                courseId: {
-                  type: "string",
-                  description: "The ID of the course"
-                },
-                studentId: {
-                  type: "string",
-                  description: "Optional: Get submission status for a specific student",
-                  required: false
-                },
-                includeSubmissionHistory: {
-                  type: "boolean",
-                  description: "Whether to include submission history details",
-                  default: false
-                }
-              },
-              required: ["courseId"]
-            }
-          },
-          {
-            name: "list-sections",
-            description: "Get a list of all sections in a course",
-            inputSchema: {
-              type: "object",
-              properties: {
-                courseId: {
-                  type: "string",
-                  description: "The ID of the course"
-                },
-                includeStudentCount: {
-                  type: "boolean",
-                  description: "Whether to include the number of students in each section",
-                  default: false
-                }
-              },
-              required: ["courseId"]
-            }
-          },
-          {
-            name: "get-my-todo-items",
-            description: "Fetch the authenticated student's to-do list",
-            inputSchema: {
-              type: "object",
-              properties: {},
-              required: [],
-            },
-          },
-          {
-            name: "get-upcoming-assignments",
-            description: "Fetch upcoming assignments across all active courses for the student",
-            inputSchema: {
-              type: "object",
-              properties: {},
-              required: [],
-            },
-          },
-          {
-            name: "get-course-grade",
-            description: "Fetch student's current overall grade in a specific course",
-            inputSchema: {
-              type: "object",
-              properties: {
-                courseId: {
-                  type: "string",
-                  description: "The ID of the course"
-                }
-              },
-              required: ["courseId"],
-            },
-          },
-          {
-            name: "get-assignment-details",
-            description: "Fetch details for a specific assignment including student's submission status",
-            inputSchema: {
-              type: "object",
-              properties: {
-                courseId: {
-                  type: "string",
-                  description: "The ID of the course"
-                },
-                assignmentId: {
-                  type: "string",
-                  description: "The ID of the assignment"
-                }
-              },
-              required: ["courseId", "assignmentId"],
-            },
-          },
-          {
-            name: "get-recent-announcements",
-            description: "Fetch recent announcements from all active courses",
-            inputSchema: {
-              type: "object",
-              properties: {
-                days: {
-                  type: "number",
-                  description: "Number of days to look back (default: 14)",
-                  default: 14
-                }
-              },
-              required: [],
-            },
-          },
-          {
-            name: "list-course-modules",
-            description: "List modules and items for a course, with student completion status",
-            inputSchema: {
-              type: "object",
-              properties: {
-                courseId: {
-                  type: "string",
-                  description: "The ID of the course"
-                }
-              },
-              required: ["courseId"],
-            },
-          },
-          {
-            name: "find-course-files",
-            description: "Search files within a course",
-            inputSchema: {
-              type: "object",
-              properties: {
-                courseId: {
-                  type: "string",
-                  description: "The ID of the course"
-                },
-                searchTerm: {
-                  type: "string",
-                  description: "Term to search for in file names"
-                }
-              },
-              required: ["courseId", "searchTerm"],
-            },
-          },
-          {
-            name: "get-unread-discussions",
-            description: "List unread discussion topics for a course",
-            inputSchema: {
-              type: "object",
-              properties: {
-                courseId: {
-                  type: "string",
-                  description: "The ID of the course"
-                }
-              },
-              required: ["courseId"],
-            },
-          },
-          {
-            name: "view-discussion-topic",
-            description: "Retrieve posts/replies for a discussion topic",
-            inputSchema: {
-              type: "object",
-              properties: {
-                courseId: {
-                  type: "string",
-                  description: "The ID of the course"
-                },
-                topicId: {
-                  type: "string",
-                  description: "The ID of the discussion topic"
-                }
-              },
-              required: ["courseId", "topicId"],
-            },
-          },
-          {
-            name: "get-my-quiz-submission",
-            description: "Retrieve student's submission details for a quiz",
-            inputSchema: {
-              type: "object",
-              properties: {
-                courseId: {
-                  type: "string",
-                  description: "The ID of the course"
-                },
-                quizId: {
-                  type: "string",
-                  description: "The ID of the quiz"
-                }
-              },
-              required: ["courseId", "quizId"],
-            },
-          },
-          {
-            name: "find-office-hours-info",
-            description: "Search common locations within a course for instructor office hours information (e.g., syllabus, announcements).",
-            inputSchema: {
-              type: "object",
-              properties: {
-                courseId: {
-                  type: "string",
-                  description: "The ID of the course to search within."
-                }
-              },
-              required: ["courseId"],
-            },
-          },
-        ],
+      return {
+        tools: this.tools.map(({ name, description, inputSchema }) => ({
+          name,
+          description,
+          inputSchema,
+        })),
       };
-      console.error("Sending ListToolsResponse:", JSON.stringify(toolsResponse).substring(0, 200) + '...');
-      return toolsResponse;
     });
 
     // Handle tool execution
@@ -300,106 +75,28 @@ class CanvasServer {
       const { name, arguments: args } = request.params;
       console.error(`Received CallToolRequest for: ${name} with args: ${JSON.stringify(args)}`);
 
+      const tool = this.tools.find((t) => t.name === name);
+      if (!tool) {
+        return {
+          error: {
+            code: -32601,
+            message: `Unknown tool: ${name}`,
+          },
+        };
+      }
+
       try {
-        switch (name) {
-          case "list-courses":
-            return await this.handleListCourses();
-
-          case "list-rubrics":
-            if (!args || typeof args.courseId !== 'string') {
-              throw new Error("Missing or invalid 'courseId' argument for list-rubrics");
-            }
-            return await this.handleListRubrics(args as { courseId: string });
-
-          case "list-assignments":
-             if (!args || typeof args.courseId !== 'string') {
-               throw new Error("Missing or invalid 'courseId' argument for list-assignments");
-             }
-             // Pass the whole args object
-             return await this.handleListAssignments(args as { courseId: string; studentId?: string; includeSubmissionHistory?: boolean });
-
-          case "list-sections":
-            if (!args || typeof args.courseId !== 'string') {
-              throw new Error("Missing or invalid 'courseId' argument for list-sections");
-            }
-            // Pass the whole args object
-            return await this.handleListSections(args as { courseId: string; includeStudentCount?: boolean });
-
-          // Student-specific tools delegated to StudentTools class
-          case "get-my-todo-items":
-            return await this.studentTools.getMyTodoItems();
-
-          case "get-upcoming-assignments":
-            return await this.studentTools.getUpcomingAssignments();
-
-          case "get-course-grade":
-            if (!args || typeof args.courseId !== 'string') {
-              throw new Error("Missing or invalid 'courseId' argument for get-course-grade");
-            }
-            return await this.studentTools.getCourseGrade(args as { courseId: string });
-
-          case "get-assignment-details":
-            if (!args || typeof args.courseId !== 'string' || typeof args.assignmentId !== 'string') {
-              throw new Error("Missing or invalid 'courseId' or 'assignmentId' arguments for get-assignment-details");
-            }
-            return await this.studentTools.getAssignmentDetails(args as { courseId: string; assignmentId: string });
-
-          case "get-recent-announcements":
-            // Args are optional here (days, courseId)
-            return await this.studentTools.getRecentAnnouncements(args as { days?: number, courseId?: string });
-
-          // case "list-course-modules": // Method not yet implemented in StudentTools
-          //   if (!args || typeof args.courseId !== 'string') {
-          //     throw new Error("Missing or invalid 'courseId' argument for list-course-modules");
-          //   }
-          //   // return await this.studentTools.listCourseModules(args as { courseId: string });
-          //   throw new Error("Tool 'list-course-modules' is not yet implemented.");
-
-          case "find-course-files": // Now implemented
-            if (!args || typeof args.courseId !== 'string' || typeof args.searchTerm !== 'string') {
-              throw new Error("Missing or invalid 'courseId' or 'searchTerm' arguments for find-course-files");
-            }
-            return await this.studentTools.findCourseFiles(args as { courseId: string; searchTerm: string });
-
-          // case "get-unread-discussions": // Method not yet implemented in StudentTools
-          //   if (!args || typeof args.courseId !== 'string') {
-          //     throw new Error("Missing or invalid 'courseId' argument for get-unread-discussions");
-          //   }
-          //   // return await this.studentTools.getUnreadDiscussions(args as { courseId: string });
-          //    throw new Error("Tool 'get-unread-discussions' is not yet implemented.");
-
-          // case "view-discussion-topic": // Method not yet implemented in StudentTools
-          //   if (!args || typeof args.courseId !== 'string' || typeof args.topicId !== 'string') {
-          //     throw new Error("Missing or invalid 'courseId' or 'topicId' arguments for view-discussion-topic");
-          //   }
-          //   // return await this.studentTools.viewDiscussionTopic(args as { courseId: string; topicId: string });
-          //    throw new Error("Tool 'view-discussion-topic' is not yet implemented.");
-
-          // case "get-my-quiz-submission": // Method not yet implemented in StudentTools
-          //   if (!args || typeof args.courseId !== 'string' || typeof args.quizId !== 'string') {
-          //     throw new Error("Missing or invalid 'courseId' or 'quizId' arguments for get-my-quiz-submission");
-          //   }
-          //   // return await this.studentTools.getMyQuizSubmission(args as { courseId: string; quizId: string });
-          //    throw new Error("Tool 'get-my-quiz-submission' is not yet implemented.");
-
-          // Add the case for the new tool
-          case "find-office-hours-info":
-            if (!args || typeof args.courseId !== 'string') {
-              throw new Error("Missing or invalid 'courseId' argument for find-office-hours-info");
-            }
-            // Call the new handler method instead of directly calling studentTools
-            return await this.handleFindOfficeHours(args as { courseId: string });
-
-          default:
-            throw new Error(`Unknown tool: ${name}`);
-        }
-      } catch (error: any) {
+        return await tool.execute(args || {}, {
+          axios: this.axiosInstance,
+          studentTools: this.studentTools,
+        });
+      } catch (error) {
         console.error(`Error executing tool '${name}':`, error);
         return {
           error: {
             code: -32000,
-            message: `Tool execution failed: ${error.message}`
-          }
+            message: error instanceof Error ? `Tool execution failed: ${error.message}` : 'Tool execution failed',
+          },
         };
       }
     });
@@ -690,347 +387,6 @@ Please present this information in a clear, concise format that helps me quickly
     });
   }
 
-  // Fetches and formats a list of all active courses from Canvas
-  private async handleListCourses() {
-    const maxRetries = 2; // Retry up to 2 times (3 attempts total)
-    const retryDelay = 1000; // 1 second delay between retries
-
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        console.error(`Attempt ${attempt + 1} to fetch courses...`); // Log attempt
-        const response = await this.axiosInstance.get('/api/v1/courses', {
-          params: {
-            enrollment_state: 'active',
-            state: ['available'],
-            per_page: 100,
-            include: ['term']
-          },
-          timeout: 15000 // Keep the 15-second timeout
-        });
-
-        const courses: Course[] = response.data;
-
-        const formattedCourses = courses
-          .filter(course => course.workflow_state === 'available')
-          .map((course: Course) => {
-            const termInfo = course.term ? ` (${course.term.name})` : '';
-            return `Course: ${course.name}${termInfo}\nID: ${course.id}\nCode: ${course.course_code}\n---`;
-          })
-          .join('\n');
-
-        // Success, return the result
-        return {
-          content: [
-            {
-              type: "text",
-              text: formattedCourses ?
-                `Available Courses:\n\n${formattedCourses}` :
-                "No active courses found.",
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        console.error(`Attempt ${attempt + 1} failed.`); // Log failure
-
-        // Check if it's an Axios error and specifically ECONNRESET
-        if (axios.isAxiosError(error) && error.code === 'ECONNRESET') {
-          console.error(`Axios ECONNRESET error fetching courses (Attempt ${attempt + 1}/${maxRetries + 1}): ${error.message}`);
-          if (attempt < maxRetries) {
-            console.error(`Retrying in ${retryDelay / 1000} second(s)...`);
-            await delay(retryDelay); // Wait before retrying
-            continue; // Go to the next iteration of the loop
-          } else {
-            console.error("Max retries reached for ECONNRESET.");
-            // Fall through to throw the error after max retries
-          }
-        } else {
-           // Log other errors (Axios or non-Axios)
-           if (axios.isAxiosError(error)) {
-             console.error(`Axios error fetching courses: ${error.message}`, error.code, error.config?.url);
-           } else {
-             console.error("Non-Axios error fetching courses:", error);
-           }
-           // Don't retry for non-ECONNRESET errors, re-throw immediately
-           if (error instanceof Error) {
-             throw new Error(`Failed to fetch courses: ${error.message}`);
-           }
-           throw new Error('Failed to fetch courses: Unknown error');
-        }
-
-        // If loop finishes due to max retries on ECONNRESET, throw the last error
-        if (error instanceof Error) {
-          throw new Error(`Failed to fetch courses after ${maxRetries + 1} attempts: ${error.message}`);
-        }
-        throw new Error(`Failed to fetch courses after ${maxRetries + 1} attempts: Unknown error`);
-      }
-    }
-    // This part should theoretically not be reached due to return/throw inside the loop
-    throw new Error('handleListCourses exited loop unexpectedly.');
-  }
-
-  // Retrieves all rubrics associated with the specified course
-  private async handleListRubrics(args: any) {
-    const { courseId } = args;
-
-    try {
-      const response = await this.axiosInstance.get(
-        `/api/v1/courses/${courseId}/rubrics`
-      );
-      const rubrics: Rubric[] = response.data;
-
-      const formattedRubrics = rubrics.map((rubric: Rubric) => 
-        `Rubric: ${rubric.title}\nID: ${rubric.id}\nDescription: ${rubric.description || 'No description'}\n---`
-      ).join('\n');
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: formattedRubrics || "No rubrics found for this course",
-          },
-        ],
-      };
-    } catch (error: unknown) {
-      if (error instanceof Error) {
-        throw new Error(`Failed to fetch rubrics: ${error.message}`);
-      }
-      throw new Error('Failed to fetch rubrics: Unknown error');
-    }
-  }
-
-  // Gets all assignments for a course with optional student submission details
-  private async handleListAssignments(args: any) {
-    const { courseId, studentId, includeSubmissionHistory = false } = args;
-    let assignments: any[] = [];
-    let page = 1;
-    let hasMore = true;
-
-    try {
-      while (hasMore) {
-        const response = await this.axiosInstance.get(
-          `/api/v1/courses/${courseId}/assignments`,
-          {
-            params: {
-              per_page: 100,
-              page: page,
-              include: studentId ? ['submission', 'submission_comments', 'submission_history'] : [],
-              student_ids: studentId ? [studentId] : undefined,
-              order_by: 'position',
-            }
-          }
-        );
-
-        console.error(`Fetched ${response.data.length} assignments from page ${page}`);
-
-        const pageAssignments = response.data;
-        assignments.push(...pageAssignments);
-
-        hasMore = pageAssignments.length === 100;
-        page += 1;
-      }
-
-      const formattedAssignments = assignments
-        .map(assignment => {
-          const parts = [
-            `Assignment: ${assignment.name}`,
-            `ID: ${assignment.id}`,
-            `Due Date: ${assignment.due_at || 'No due date'}`,
-            `Points Possible: ${assignment.points_possible}`,
-            `Status: ${assignment.published ? 'Published' : 'Unpublished'}`
-          ];
-
-          if (assignment.submission) {
-            parts.push('Submission:');
-            parts.push(`  Status: ${assignment.submission.workflow_state}`);
-            parts.push(`  Submitted: ${assignment.submission.submitted_at || 'Not submitted'}`);
-            
-            if (assignment.submission.score !== undefined) {
-              parts.push(`  Score: ${assignment.submission.score}`);
-            }
-
-            if (assignment.submission.submission_comments?.length > 0) {
-              parts.push('  Teacher Comments:');
-              assignment.submission.submission_comments
-                .filter((comment: any) => comment.author?.role === 'teacher')
-                .forEach((comment: any) => {
-                  const date = new Date(comment.created_at).toLocaleString();
-                  parts.push(`    [${date}] ${comment.comment}`);
-                });
-          } else {
-            parts.push('  Teacher Comments: None');
-          }
-
-          if (includeSubmissionHistory && assignment.submission.versioned_submissions?.length > 0) {
-            parts.push('  Submission History:');
-            assignment.submission.versioned_submissions
-              .sort((a: any, b: any) => new Date(a.submitted_at).getTime() - new Date(b.submitted_at).getTime())
-              .forEach((version: any, index: number) => {
-                const date = new Date(version.submitted_at).toLocaleString();
-                parts.push(`    Attempt ${index + 1} [${date}]:`);
-                if (version.score !== undefined) {
-                  parts.push(`      Score: ${version.score}`);
-                }
-                if (version.grade) {
-                  parts.push(`      Grade: ${version.grade}`);
-                }
-                if (version.submission_type) {
-                  parts.push(`      Type: ${version.submission_type}`);
-                }
-              });
-          }
-        } else {
-          parts.push('Submission: No submission data available');
-        }
-
-        return parts.join('\n');
-      })
-      .join('\n---\n');
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: assignments.length > 0
-              ? `Assignments in course ${courseId}:\n\n${formattedAssignments}\n\nTotal assignments: ${assignments.length}`
-              : "No assignments found in this course.",
-          },
-        ],
-      };
-    } catch (error: any) {
-      console.error('Full error details:', error.response?.data || error);
-      if (error.response?.data?.errors) {
-        throw new Error(`Failed to fetch assignments: ${JSON.stringify(error.response.data.errors)}`);
-      }
-      if (error instanceof Error) {
-        throw new Error(`Failed to fetch assignments: ${error.message}`);
-      }
-      throw new Error('Failed to fetch assignments: Unknown error');
-    }
-  }
-
-  // Retrieves all sections for a course
-  private async handleListSections(args: any) {
-    const { courseId, includeStudentCount = false } = args;
-    let sections: any[] = [];
-    let page = 1;
-    let hasMore = true;
-
-    try {
-      while (hasMore) {
-        const response = await this.axiosInstance.get(
-          `/api/v1/courses/${courseId}/sections`,
-          {
-            params: {
-              per_page: 100,
-              page: page,
-              include: includeStudentCount ? ['total_students'] : []
-            }
-          }
-        );
-
-        const pageSections = response.data;
-        sections.push(...pageSections);
-
-        hasMore = pageSections.length === 100;
-        page += 1;
-      }
-
-      const formattedSections = sections
-        .map(section => {
-          const parts = [
-            `Name: ${section.name}`,
-            `ID: ${section.id}`,
-            `SIS ID: ${section.sis_section_id || 'N/A'}`
-          ];
-
-          if (section.start_at) {
-            parts.push(`Start Date: ${new Date(section.start_at).toLocaleDateString()}`);
-          }
-          if (section.end_at) {
-            parts.push(`End Date: ${new Date(section.end_at).toLocaleDateString()}`);
-          }
-
-          if (includeStudentCount) {
-            parts.push(`Total Students: ${section.total_students || 0}`);
-          }
-
-          if (section.restrict_enrollments_to_section_dates) {
-            parts.push('Restricted to Section Dates: Yes');
-          }
-
-          return parts.join('\n');
-        })
-        .join('\n---\n');
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: sections.length > 0
-              ? `Sections in course ${courseId}:\n\n${formattedSections}\n\nTotal sections: ${sections.length}`
-              : "No sections found in this course.",
-          },
-        ],
-      };
-    } catch (error: any) {
-      console.error('Full error details:', error.response?.data || error);
-      if (error.response?.status === 404) {
-        throw new Error(`Course ${courseId} not found`);
-      }
-      if (error.response?.data?.errors) {
-        throw new Error(`Failed to fetch sections: ${JSON.stringify(error.response.data.errors)}`);
-      }
-      if (error instanceof Error) {
-        throw new Error(`Failed to fetch sections: ${error.message}`);
-      }
-      throw new Error('Failed to fetch sections: Unknown error');
-    }
-  }
-
-  // New handler method for finding office hours
-  private async handleFindOfficeHours(args: { courseId: string }) {
-    try {
-      console.error(`Executing find-office-hours-info for course ${args.courseId}`);
-      const results = await this.studentTools.findOfficeHoursInfo(args);
-      console.error(`find-office-hours-info result: ${JSON.stringify(results).substring(0, 200)}...`);
-      return results;
-    } catch (error: any) {
-      console.error(`Error in handleFindOfficeHours: ${error.message}`);
-      return {
-        error: {
-          code: -32001,
-          message: `Tool execution failed for find-office-hours-info: ${error.message}`
-        }
-      };
-    }
-  }
-
-  // Helper method to fetch all pages
-  private async fetchAllPages(url: string, config: any): Promise<any[]> {
-    let results: any[] = [];
-    let page = 1;
-    let hasMore = true;
-
-    while (hasMore) {
-      const response = await this.axiosInstance.get(url, {
-        ...config,
-        params: {
-          ...config.params,
-          page: page
-        }
-      });
-
-      const pageData = response.data;
-      results.push(...pageData);
-
-      const perPage = config?.params?.per_page || 10;
-      hasMore = pageData.length === perPage;
-      page += 1;
-    }
-
-    return results;
-  }
-
   // Starts the server using stdio transport
   public async start() {
     const transport = new StdioServerTransport();
@@ -1045,22 +401,4 @@ Please present this information in a clear, concise format that helps me quickly
   }
 }
 
-// Read configuration from environment variables
-const config: CanvasConfig = {
-  apiToken: process.env.CANVAS_API_TOKEN || "",
-  baseUrl: process.env.CANVAS_BASE_URL || "https://fhict.instructure.com",
-};
-
-// Validate configuration
-if (!config.apiToken) {
-  console.error("Error: CANVAS_API_TOKEN environment variable is required");
-  process.exit(1);
-}
-
-// Start the server
-const server = new CanvasServer(config);
-console.error("Starting Canvas MCP Server...");
-server.start().catch((error: unknown) => {
-  console.error("Fatal error during server startup:", error);
-  process.exit(1);
-});
+export { CanvasServer };

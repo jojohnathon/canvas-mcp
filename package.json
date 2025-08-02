@@ -2,11 +2,12 @@
   "name": "canvas-mcp",
   "version": "1.0.0",
   "type": "module",
-  "main": "build/index.js",
+  "main": "build/server/server.js",
   "scripts": {
     "build": "tsc",
-    "start": "node build/index.js",
-    "test-client": "node build/test-client.js"
+    "start": "node build/server/server.js",
+    "test-client": "node build/test-client.js",
+    "test": "node --loader ts-node/esm --test \"src/**/*.test.ts\" webui/test-env.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.3",
